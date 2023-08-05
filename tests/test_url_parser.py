@@ -1,4 +1,5 @@
-from src.docker_pull import RegistryInfo
+from src.utils import RegistryInfo
+from src.auth import get_url_from_auth_header
 
 
 def test_parse_registry_url():
@@ -7,3 +8,19 @@ def test_parse_registry_url():
 
     google_io = RegistryInfo.from_url("gcr.io/distroless/cc:1.2.3")
     assert google_io == RegistryInfo("gcr.io", "distroless/cc", "1.2.3")
+
+    # test with custom port
+    localhost = RegistryInfo.from_url("localhost:5000/my/awesome/image:tag")
+    assert localhost == RegistryInfo("localhost:5000", "my/awesome/image", "tag")
+
+    # check if http is also supported
+    insecure_registry = RegistryInfo.from_url("http://registry:5000/my/repository/")
+    assert insecure_registry == RegistryInfo("registry:5000", "my/repository", "latest", False)
+    assert insecure_registry.path == "/v2/my/repository/"
+
+
+def test_url_from_auth():
+    url = get_url_from_auth_header(
+        'Bearer realm="https://auth.docker.io/token",service="registry.docker.io",scope="repository:library/nginx:pull"'
+    )
+    assert url == "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/nginx:pull"

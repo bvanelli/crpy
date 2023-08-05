@@ -13,7 +13,8 @@ import hashlib
 import json
 from os.path import join
 import shutil
-from http.client import HTTPConnection, HTTPSConnection
+import requests
+from src.utils import RegistryInfo
 
 
 def compute_digest(filename):
@@ -24,57 +25,23 @@ def compute_digest(filename):
     return "sha256:" + sha256_hash.hexdigest()
 
 
-def parse_dst(dst):
-    """
-    >>> parse_dst('http://registry:5000/my/repository') == {'https': False, 'host': 'registry:5000', 'path': '/v2/my/repository/'}
-    True
-    >>> parse_dst('http://registry:5000/my/repository/') == {'https': False, 'host': 'registry:5000', 'path': '/v2/my/repository/'}
-    True
-    >>> parse_dst('registry/my/repository/') == {'https': True, 'host': 'registry:5000', 'path': '/v2/my/repository/'}
-    True
-    >>> parse_dst('registry:5000/my/repository/') == {'https': True, 'host': 'registry:5000', 'path': '/v2/my/repository/'}
-    True
-    """
-    if not dst.startswith("http://") and not dst.startswith("https://"):
-        dst = "https://" + dst
-
-    if dst.startswith("https://"):
-        is_http = True
-        dst = dst[8:]
-    else:
-        is_http = False
-        dst = dst[7:]
-
-    dst = dst.rstrip("/") + "/"
-
-    p = dst.find("/", dst.find("//") + 2)
-    dst = dst[:p] + "/v2" + dst[p:]
-
-    host = dst.split("/")[0]
-    if host.find(":") == -1:
-        host = host + ":5000"
-
-    return {"https": is_http, "host": host, "path": dst[dst.find("/") :]}
-
-
-def perform_request(method, registry, path, body=None, headers={}):
+def perform_request(
+    method, registry: RegistryInfo, path: str, body: dict = None, headers: dict = None
+) -> requests.Response:
     """
     See also: https://mail.python.org/pipermail/web-sig/2007-April/002662.html
     """
     response = None
     try:
-        full_path = registry["path"] + path
-        print(">  " + method + " " + registry["host"] + " " + full_path)
-        h = HTTPSConnection(registry["host"]) if registry["https"] else HTTPConnection(registry["host"])
-        h.request(method, full_path, body, headers)
-        response = h.getresponse()
+        full_path = registry.path + path
+        print(f">  {method} {registry.registry} {full_path}")
+        response = getattr(requests, method.lower())(full_path, body=body, headers=headers)
     finally:
-        if response != None:
-            data = response.read()
-            if len(data) > 0 and response.getcode() not in [201, 202]:
+        if response is not None:
+            data = response.content
+            if len(data) > 0 and response.status_code not in [201, 202]:
                 print(data)
-        h.close()
-    print("    Return:" + str(response.status))  # response.getcode())
+    print("    Return:" + str(response.status_code))  # response.getcode())
     return response
 
 
@@ -82,13 +49,10 @@ def upload_blob(registry, src_f, media_type):
     print("* Uploading " + src_f)
     r = perform_request("POST", registry, "blobs/uploads/")
 
-    if hasattr(r, "headers"):  # Python 3
-        location = r.headers["Location"]
-    else:  # Python 2
-        location = [x[1] for x in r.getheaders() if x[0] == "location"][0]
+    location = r.headers["Location"]
 
     # TODO: extract and unit test
-    location_no_root = location[location.find(registry["path"]) + len(registry["path"]) :]
+    location_no_root = location[location.find(registry.path) + len(registry.path) :]
     with open(src_f, "rb") as content_file:
         content = content_file.read()
     location_with_digest = (
@@ -98,22 +62,19 @@ def upload_blob(registry, src_f, media_type):
         + "&"
         + location_no_root[location_no_root.find("?") + 1 :]
     )
-    r = perform_request(
+    perform_request(
         "PUT",
         registry,
         location_with_digest,
         content,
         {"Content-Type": "application/octet-stream", "Content-Length": str(len(content))},  # 'application/octet-stream'
     )
-    # print(r.getcode())
-    # print(r.getheaders())
-    return
 
 
 def upload_manifest(registry, manifest):
     print("* Uploading manifest")
     headers = {"Content-Type": "application/vnd.docker.distribution.manifest.v2+json"}
-    r = perform_request("PUT", registry, "manifests/latest", manifest, headers)
+    perform_request("PUT", registry, "manifests/latest", manifest, headers)
 
 
 def get_file_size(f):
@@ -150,12 +111,12 @@ if __name__ == "__main__":
 
     src = sys.argv[1]
     assert os.path.isfile(src), src + " is not a file / does not exist"
-    repository_url = parse_dst(sys.argv[2])
+    repository_url = RegistryInfo.from_url(sys.argv[2])
     try:
         temp_dir = mkdtemp()
         try:
             t = tarfile.TarFile(src)
-        except tarfile.ReadError as e:
+        except tarfile.ReadError:
             print("Failed. Is " + src + " an Docker image?")
             sys.exit(1)
         t.extractall(temp_dir)
@@ -168,7 +129,7 @@ if __name__ == "__main__":
             config = manifest["Config"] if "Config" in manifest else manifest["config"]
             config_f = join(temp_dir, config)
             layers = manifest["Layers"] if "Layers" in manifest else manifest["layers"]
-            layers_f = [join(temp_dir, l) for l in layers]
+            layers_f = [join(temp_dir, layer) for layer in layers]
         manifest = build_manifest(config_f, layers_f)
         upload_blob(repository_url, config_f, "application/vnd.docker.container.image.v1+json")
         for layer_f in layers_f:
