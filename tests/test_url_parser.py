@@ -18,6 +18,13 @@ def test_parse_registry_url():
     assert insecure_registry == RegistryInfo("registry:5000", "my/repository", "latest", False)
     assert insecure_registry.path == "/v2/my/repository/"
 
+    # check if the default url is used when url is omitted. It should default to docker hubs
+    alpine = RegistryInfo.from_url("alpine")
+    assert str(alpine) == "index.docker.io/library/alpine:latest"
+    # check if it also works when providing user specific images
+    bitnami = RegistryInfo.from_url("bitnami/postgresql")
+    assert str(bitnami) == "index.docker.io/library/bitnami/postgresql:latest"
+
 
 def test_url_from_auth():
     url = get_url_from_auth_header(
