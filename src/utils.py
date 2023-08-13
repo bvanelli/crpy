@@ -8,8 +8,8 @@ import tempfile
 
 import aiohttp
 from dataclasses import dataclass
-from functools import lru_cache
 from src.auth import get_token, get_url_from_auth_header
+from src.storage import get_credentials
 from typing import Optional, Union, List
 import io
 from async_lru import alru_cache
@@ -37,9 +37,15 @@ class Response:
         return json.loads(self.data)
 
 
-async def _get(url, headers: dict = None) -> Response:
+async def _get(url, headers: dict = None, params: dict = None) -> Response:
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
+        async with session.get(url, headers=headers, params=params) as response:
+            return Response(response.status, await response.read(), dict(response.headers))
+
+
+async def _post(url, headers: dict = None, params: dict = None, data: dict = None) -> Response:
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, params=params, data=data) as response:
             return Response(response.status, await response.read(), dict(response.headers))
 
 
@@ -53,7 +59,7 @@ async def _stream(url, headers: dict = None):
 def compute_sha256(file: Union[str, io.BytesIO, bytes]):
     # If input is a string, consider it a filename
     if isinstance(file, str):
-        with open(file, 'rb') as f:
+        with open(file, "rb") as f:
             content = f.read()
     # If input is BytesIO, get value directly
     elif isinstance(file, io.BytesIO):
@@ -61,7 +67,7 @@ def compute_sha256(file: Union[str, io.BytesIO, bytes]):
     elif isinstance(file, bytes):
         content = file
     else:
-        raise TypeError('Invalid input type.')
+        raise TypeError("Invalid input type.")
 
     # Compute the sha256 hash
     sha256_hash = hashlib.sha256(content).hexdigest()
@@ -114,6 +120,22 @@ class RegistryInfo:
     def __str__(self):
         return f"{self.registry}/{self.repository}:{self.tag}"
 
+    async def auth(self, www_auth: str = None, username: str = None, password: str = None, b64_token: str = None):
+        if www_auth is None:
+            method = "https" if self.https else "http"
+            response = await _get(f"{method}://{self.registry}/v2/")
+            www_auth = response.headers["WWW-Authenticate"]
+        assert www_auth.startswith('Bearer realm="')
+        # check if config contains username and password we can use
+        if not b64_token:
+            b64_token = get_credentials(self.registry)
+        # reuse this token in consecutive requests
+        self.token = get_token(
+            get_url_from_auth_header(www_auth), username=username, password=password, b64_token=b64_token
+        )
+        print(f"Authenticated at {self}")
+        return self.token
+
     @staticmethod
     def from_url(url: str) -> "RegistryInfo":
         """
@@ -134,12 +156,22 @@ class RegistryInfo:
         """
         if "://" in url:
             scheme, url = url.split("://")
+            has_scheme = True
         else:
-            scheme = "https"
-        if url.count("/") == 0 or (url.count("/") == 1 and "." not in url):
+            scheme, has_scheme = "https", False
+        possibly_hub_image = url.count("/") == 0 or (  # example: alpine:latest
+            url.count("/") == 1  # example: bitnami/postgres:latest
+            and "." not in url.split("/")[0]  # exception: myregistry.com/alpine:latest
+            and ":" not in url.split("/")[0]  # exception: localhost:5000/alpine:latest
+        )
+        if not has_scheme and possibly_hub_image:
+            # when user provides a single word like "alpine" or "alpine:latest" or bitnami/postgresql
             registry, repository_raw = "index.docker.io", f"library/{url}"
         else:
             registry, repository_raw = url.split("/", 1)
+            if "docker.io" in registry and "/" not in repository_raw:
+                # library image
+                repository_raw = f"library/{repository_raw}"
         name, tag = (repository_raw.split(":") + ["latest"])[:2]
         return RegistryInfo(registry, name.strip("/"), tag, scheme == "https")
 
@@ -181,11 +213,10 @@ class RegistryInfo:
         response = await _get(self.manifest_url(), headers | self._headers)
         if response.status == 401:
             www_auth = response.headers["WWW-Authenticate"]
-            assert www_auth.startswith('Bearer realm="')
-            # reuse this token in consecutive requests
-            self.token = get_token(get_url_from_auth_header(www_auth))
-            print(f"Authenticated at {self}")
+            await self.auth(www_auth)
             response = await _get(self.manifest_url(), headers | self._headers)
+            if response.status == 401:
+                raise ValueError(f"Could not authenticate to registry {self}")
         return response
 
     @alru_cache
@@ -200,7 +231,8 @@ class RegistryInfo:
                     return manifests["manifests"][idx]
             raise ValueError(f"Architecture {architecture} not found for image {self}")
         else:
-            return (await self.get_manifest()).json()
+            manifest = await self.get_manifest()
+            return manifest.json()
 
     @alru_cache
     async def get_config(self, architecture: Union[str, Platform] = None) -> Response:
@@ -229,13 +261,26 @@ class RegistryInfo:
         layers = [m["digest"] for m in manifest["layers"]]
         return layers
 
-    async def pull_layer(self, layer: str, file_obj=None) -> Optional[bytes]:
+    async def pull_layer(self, layer: str, file_obj: Union[io.BytesIO, None] = None) -> Optional[bytes]:
         if file_obj is None:
             response = await _get(f"{self.blobs_url()}/{layer}", self._headers)
             return response.data
         else:
             async for chunk in _stream(f"{self.blobs_url()}/{layer}", self._headers):
                 file_obj.write(chunk)
+
+    async def push_layer(self, layer, file_obj: Union[bytes, str, pathlib.Path]):
+        # check if it can be uploaded
+        response = await _post(f"{self.path}/blobs/uploads/")
+        print(response.headers["Location"])
+        if isinstance(file_obj, pathlib.Path) or isinstance(file_obj, str):
+            with open(file_obj, "rb") as f:
+                content = f.read()
+        elif isinstance(file_obj, io.BytesIO):
+            content = file_obj.read()
+        else:
+            content = file_obj
+        return None
 
     async def pull(self, output_file: Union[str, pathlib.Path, io.BytesIO], architecture: Union[str, Platform] = None):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -269,13 +314,23 @@ class RegistryInfo:
                 os.chdir(temp_dir)
                 tar_out.add(".")
 
+    async def push(self, input_file: Union[str, pathlib.Path, io.BytesIO], architecture: Union[str, Platform] = None):
+        try:
+            if isinstance(input_file, io.BytesIO):
+                t = tarfile.TarFile(fileobj=input_file)
+            else:
+                t = tarfile.TarFile(input_file)
+        except tarfile.ReadError:
+            raise ValueError(f"Failed to load {input_file}. Is an Docker image?")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            t.extractall(temp_dir)
+            manifest_path = pathlib.Path(temp_dir) / "manifest.json"
+            manifest_content = manifest_path.read_text()
+            manifest = json.loads(manifest_content)[-1]
+            config = manifest["Config"] if "Config" in manifest else manifest["config"]
+            layers = manifest["Layers"] if "Layers" in manifest else manifest["layers"]
 
-@lru_cache
-def get_cache_dir() -> pathlib.Path:
-    cache_dir_root = os.path.expanduser("~")
-    assert os.path.isdir(cache_dir_root)
-    cache_dir = cache_dir_root + "/.docker-pull-push/"
-    if not os.path.exists(cache_dir):
-        print("Creating cache directory: " + cache_dir)
-        os.makedirs(cache_dir)
-    return pathlib.Path(cache_dir)
+            await self.push_layer(config, manifest_path)
+            for layer in layers:
+                layer_path = pathlib.Path(temp_dir) / layer
+                await self.push_layer(layer, layer_path)

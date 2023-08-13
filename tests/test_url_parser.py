@@ -12,6 +12,8 @@ def test_parse_registry_url():
     # test with custom port
     localhost = RegistryInfo.from_url("localhost:5000/my/awesome/image:tag")
     assert localhost == RegistryInfo("localhost:5000", "my/awesome/image", "tag")
+    localhost_short = RegistryInfo.from_url("localhost:5000/alpine:latest")
+    assert localhost_short == RegistryInfo("localhost:5000", "alpine", "latest")
 
     # check if http is also supported
     insecure_registry = RegistryInfo.from_url("http://registry:5000/my/repository/")

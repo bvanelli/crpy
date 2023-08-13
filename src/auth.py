@@ -4,7 +4,12 @@ from functools import lru_cache
 
 
 @lru_cache
-def get_token(url, username: str = None, password: str = None):
+def get_token(
+    url: str,
+    username: str = None,
+    password: str = None,
+    b64_token: str = None,
+):
     # get the credentials here.
     # I'll use the simple auth since it mostly works
     headers = {}
@@ -12,7 +17,9 @@ def get_token(url, username: str = None, password: str = None):
         username, password = "", ""
         token = b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
         headers = {"Authorization": f"Basic {token}"}
-    token_req = requests.get(url, headers)
+    elif b64_token:
+        headers = {"Authorization": f"Basic {b64_token}"}
+    token_req = requests.get(url, headers=headers)
     token_req.raise_for_status()
     req_json = token_req.json()
     if "token" in req_json:
@@ -30,7 +37,5 @@ def get_url_from_auth_header(h: str):
     """
     start_key = 'Bearer realm="'
     assert h.startswith(start_key)
-    out = h.lstrip(start_key).replace(
-        '",', "?", 1
-    ).replace('",', "&").replace('="', "=").rstrip('"')
+    out = h.lstrip(start_key).replace('",', "?", 1).replace('",', "&").replace('="', "=").rstrip('"')
     return out

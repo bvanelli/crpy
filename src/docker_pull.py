@@ -9,7 +9,8 @@ import json
 from http.client import HTTPConnection, HTTPSConnection
 from typing import Union
 from src.auth import get_token, get_url_from_auth_header
-from src.utils import RegistryInfo, get_cache_dir
+from src.utils import RegistryInfo
+from src.storage import get_config_dir
 
 
 def get(url, headers_req: dict = None):
@@ -86,7 +87,7 @@ def pull_tar_gz(cache_dir: pathlib.Path, url: str, name: str, path: str):
 
 def pull_image(image_url: str, output_file: Union[str, pathlib.Path, io.BytesIO]):
     args = RegistryInfo.from_url(image_url)
-    cache_dir = get_cache_dir()
+    cache_dir = get_config_dir()
     with tempfile.TemporaryDirectory() as temp_dir:
         web_manifest = pull_json(args.manifest_url())
         config_digest = web_manifest["config"]["digest"]
