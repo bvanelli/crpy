@@ -37,15 +37,12 @@ class Response:
         return json.loads(self.data)
 
 
-async def _get(url, headers: dict = None, params: dict = None) -> Response:
+async def _request(
+    url, headers: dict = None, params: dict = None, data: Union[dict, bytes] = None, method: str = "post"
+) -> Response:
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, params=params) as response:
-            return Response(response.status, await response.read(), dict(response.headers))
-
-
-async def _post(url, headers: dict = None, params: dict = None, data: dict = None) -> Response:
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers, params=params, data=data) as response:
+        method_fn = getattr(session, method)
+        async with method_fn(url, headers=headers, params=params, data=data) as response:
             return Response(response.status, await response.read(), dict(response.headers))
 
 
@@ -72,7 +69,7 @@ def compute_sha256(file: Union[str, io.BytesIO, bytes]):
     # Compute the sha256 hash
     sha256_hash = hashlib.sha256(content).hexdigest()
 
-    return sha256_hash
+    return f"sha256:{sha256_hash}"
 
 
 class Platform(enum.Enum):
@@ -123,7 +120,7 @@ class RegistryInfo:
     async def auth(self, www_auth: str = None, username: str = None, password: str = None, b64_token: str = None):
         if www_auth is None:
             method = "https" if self.https else "http"
-            response = await _get(f"{method}://{self.registry}/v2/")
+            response = await _request(f"{method}://{self.registry}/v2/", method="get")
             www_auth = response.headers["WWW-Authenticate"]
         assert www_auth.startswith('Bearer realm="')
         # check if config contains username and password we can use
@@ -175,10 +172,6 @@ class RegistryInfo:
         name, tag = (repository_raw.split(":") + ["latest"])[:2]
         return RegistryInfo(registry, name.strip("/"), tag, scheme == "https")
 
-    @property
-    def path(self):
-        return f"/v2/{self.repository}/"
-
     @alru_cache
     async def get_manifest(self, fat: bool = False) -> Response:
         """
@@ -210,11 +203,11 @@ class RegistryInfo:
                     )
                 )
             }
-        response = await _get(self.manifest_url(), headers | self._headers)
+        response = await _request(self.manifest_url(), headers | self._headers, method="get")
         if response.status == 401:
             www_auth = response.headers["WWW-Authenticate"]
             await self.auth(www_auth)
-            response = await _get(self.manifest_url(), headers | self._headers)
+            response = await _request(self.manifest_url(), headers | self._headers, method="get")
             if response.status == 401:
                 raise ValueError(f"Could not authenticate to registry {self}")
         return response
@@ -229,7 +222,7 @@ class RegistryInfo:
             for idx, a in enumerate(available_architectures):
                 if a == architecture:
                     return manifests["manifests"][idx]
-            raise ValueError(f"Architecture {architecture} not found for image {self}")
+            raise ValueError(f"No matching manifest for {architecture} in the manifest list entries at {self}")
         else:
             manifest = await self.get_manifest()
             return manifest.json()
@@ -246,7 +239,7 @@ class RegistryInfo:
         """
         manifest = await self.get_manifest_from_architecture(architecture)
         config_digest = manifest["config"]["digest"]
-        response = await _get(f"{self.blobs_url()}/{config_digest}", self._headers)
+        response = await _request(f"{self.blobs_url()}/{config_digest}", self._headers, method="get")
         return response
 
     @alru_cache
@@ -263,27 +256,15 @@ class RegistryInfo:
 
     async def pull_layer(self, layer: str, file_obj: Union[io.BytesIO, None] = None) -> Optional[bytes]:
         if file_obj is None:
-            response = await _get(f"{self.blobs_url()}/{layer}", self._headers)
+            response = await _request(f"{self.blobs_url()}/{layer}", self._headers, method="get")
             return response.data
         else:
             async for chunk in _stream(f"{self.blobs_url()}/{layer}", self._headers):
                 file_obj.write(chunk)
 
-    async def push_layer(self, layer, file_obj: Union[bytes, str, pathlib.Path]):
-        # check if it can be uploaded
-        response = await _post(f"{self.path}/blobs/uploads/")
-        print(response.headers["Location"])
-        if isinstance(file_obj, pathlib.Path) or isinstance(file_obj, str):
-            with open(file_obj, "rb") as f:
-                content = f.read()
-        elif isinstance(file_obj, io.BytesIO):
-            content = file_obj.read()
-        else:
-            content = file_obj
-        return None
-
     async def pull(self, output_file: Union[str, pathlib.Path, io.BytesIO], architecture: Union[str, Platform] = None):
         with tempfile.TemporaryDirectory() as temp_dir:
+            print(f"{self.tag}: Pulling from {self.registry}/{self.repository}")
             web_manifest = await self.get_manifest_from_architecture(architecture)
             config = await self.get_config(architecture)
 
@@ -295,12 +276,12 @@ class RegistryInfo:
             for layer in await self.get_layers():
                 layer_folder = layer.split(":")[-1]
                 path = layer_folder + "/layer.tar"
-                print(f"Pulling layer {layer_folder}")
                 layer_bytes = await self.pull_layer(layer)
                 os.makedirs(f"{temp_dir}/{layer_folder}", exist_ok=True)
                 with open(f"{temp_dir}/{path}", "wb") as f:
                     f.write(layer_bytes)
                 layer_path_l.append(path)
+                print(f"{layer[0:12]}: Pull complete")
 
             manifest = [{"Config": config_filename, "RepoTags": [str(self)], "Layers": layer_path_l}]
             with open(f"{temp_dir}/manifest.json", "w") as outfile:
@@ -313,6 +294,63 @@ class RegistryInfo:
             with tarfile.open(**output_kwargs) as tar_out:
                 os.chdir(temp_dir)
                 tar_out.add(".")
+            print(f"Downloaded image from {self}")
+
+    async def push_layer(self, file_obj: Union[bytes, str, pathlib.Path], force: bool = False) -> Optional[dict]:
+        # load layer and compute it's digest
+        if isinstance(file_obj, pathlib.Path) or isinstance(file_obj, str):
+            with open(file_obj, "rb") as f:
+                content = f.read()
+        elif isinstance(file_obj, io.BytesIO):
+            content = file_obj.read()
+        else:
+            content = file_obj
+        digest = compute_sha256(content)
+        manifest = {
+            "size": len(content),
+            "digest": digest,
+        }
+        # first check if a blob exists with a HEAD request
+        response = await _request(f"{self.blobs_url()}/{digest}", method="head")
+        if response.status == 200 and not force:
+            # layer already exists
+            manifest["existing"] = True
+            return manifest
+        # the process for pushing a layer is first making a request to /uploads and getting the location header
+        response = await _request(f"{self.blobs_url()}/uploads/")
+        location_header = response.headers["Location"]
+        # we do a monolith upload with a single PUT requests
+        response = await _request(
+            f"{location_header}&digest={digest}",
+            method="put",
+            data=content,
+            headers=self._headers | {"Content-Type": "application/octet-stream"},
+        )
+        assert response.status == 201, f"Failed to upload blob with digest {digest}: {response.data}"
+        manifest["existing"] = False
+        return manifest
+
+    def build_manifest(
+        self, config: dict, layers: List[dict], schema_version: int = 2, media_type: str = _schema2_mimetype
+    ):
+        return {
+            "schemaVersion": schema_version,
+            "mediaType": media_type,
+            "config": config,
+            "layers": layers,
+        }
+
+    async def push_manifest(self, manifest: dict):
+        # build the manifest here according to
+        # containers.gitbook.io/build-containers-the-hard-way/#registry-format-docker-image-manifest-v-2-schema-2
+        response = await _request(
+            f"{self.manifest_url()}",
+            method="put",
+            data=json.dumps(manifest, indent=3).encode(),
+            headers=self._headers | {"Content-Type": _schema2_mimetype},
+        )
+        assert response.status == 201
+        return response
 
     async def push(self, input_file: Union[str, pathlib.Path, io.BytesIO], architecture: Union[str, Platform] = None):
         try:
@@ -327,10 +365,31 @@ class RegistryInfo:
             manifest_path = pathlib.Path(temp_dir) / "manifest.json"
             manifest_content = manifest_path.read_text()
             manifest = json.loads(manifest_content)[-1]
-            config = manifest["Config"] if "Config" in manifest else manifest["config"]
             layers = manifest["Layers"] if "Layers" in manifest else manifest["layers"]
 
-            await self.push_layer(config, manifest_path)
+            print(f"The push refers to repository [{self}]")
+
+            # upload config
+            config = manifest["Config"] if "Config" in manifest else manifest["config"]
+            config_path = pathlib.Path(temp_dir) / config
+            config_manifest = await self.push_layer(config_path)
+            config_manifest.pop("existing")
+            config_manifest["mediaType"] = "application/vnd.docker.container.image.v1+json"
+
+            # upload layers
+            layers_manifest = []
             for layer in layers:
                 layer_path = pathlib.Path(temp_dir) / layer
-                await self.push_layer(layer, layer_path)
+                layer_manifest = await self.push_layer(layer_path)
+                if not layer_manifest["existing"]:
+                    print(f"{layer[0:12]}: Pushed")
+                else:
+                    print(f"{layer[0:12]}: Layer already exists")
+                layer_manifest.pop("existing")
+                layer_manifest["mediaType"] = "application/vnd.docker.image.rootfs.diff.tar.gzip"
+                layers_manifest.append(layer_manifest)
+            # once the blobs are committed, we can push the manifest
+            image_manifest = self.build_manifest(config_manifest, layers_manifest)
+            r = await self.push_manifest(image_manifest)
+            image_digest = r.headers["Docker-Content-Digest"]
+            print(f"Pushed {self.tag}: digest: {image_digest}")

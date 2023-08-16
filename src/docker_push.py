@@ -35,7 +35,8 @@ def perform_request(
     try:
         full_path = registry.path + path
         print(f">  {method} {registry.registry} {full_path}")
-        response = getattr(requests, method.lower())(full_path, body=body, headers=headers)
+        m = getattr(requests, method.lower())
+        response = m(full_path, data=body, headers=headers)
     finally:
         if response is not None:
             data = response.content

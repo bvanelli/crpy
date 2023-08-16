@@ -18,7 +18,6 @@ def test_parse_registry_url():
     # check if http is also supported
     insecure_registry = RegistryInfo.from_url("http://registry:5000/my/repository/")
     assert insecure_registry == RegistryInfo("registry:5000", "my/repository", "latest", False)
-    assert insecure_registry.path == "/v2/my/repository/"
 
     # check if the default url is used when url is omitted. It should default to docker hubs
     alpine = RegistryInfo.from_url("alpine")
