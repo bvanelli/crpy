@@ -8,8 +8,8 @@ import tempfile
 
 import aiohttp
 from dataclasses import dataclass
-from src.auth import get_token, get_url_from_auth_header
-from src.storage import get_credentials
+from crpy.auth import get_token, get_url_from_auth_header
+from crpy.storage import get_credentials
 from typing import Optional, Union, List
 import io
 from async_lru import alru_cache
@@ -40,14 +40,14 @@ class Response:
 async def _request(
     url, headers: dict = None, params: dict = None, data: Union[dict, bytes] = None, method: str = "post"
 ) -> Response:
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(trust_env=True) as session:
         method_fn = getattr(session, method)
         async with method_fn(url, headers=headers, params=params, data=data) as response:
             return Response(response.status, await response.read(), dict(response.headers))
 
 
 async def _stream(url, headers: dict = None):
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(trust_env=True) as session:
         async with session.get(url, headers=headers) as response:
             async for data, _ in response.content.iter_chunks():
                 yield data

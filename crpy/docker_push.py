@@ -14,7 +14,7 @@ import json
 from os.path import join
 import shutil
 import requests
-from src.utils import RegistryInfo
+from crpy.utils import RegistryInfo
 
 
 def compute_digest(filename):

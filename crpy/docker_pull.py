@@ -8,9 +8,9 @@ import tarfile
 import json
 from http.client import HTTPConnection, HTTPSConnection
 from typing import Union
-from src.auth import get_token, get_url_from_auth_header
-from src.utils import RegistryInfo
-from src.storage import get_config_dir
+from crpy.auth import get_token, get_url_from_auth_header
+from crpy.utils import RegistryInfo
+from crpy.storage import get_config_dir
 
 
 def get(url, headers_req: dict = None):

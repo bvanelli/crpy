@@ -5,3 +5,5 @@ alpine
 tmp/
 docker-push-tmp
 base
+build/
+*.egg-info/

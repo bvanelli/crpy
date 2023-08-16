@@ -1,5 +1,5 @@
 import pytest
-from src.utils import RegistryInfo
+from crpy.utils import RegistryInfo
 
 
 @pytest.mark.asyncio

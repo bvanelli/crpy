@@ -1,8 +1,8 @@
 import io
 import tarfile
 import pytest
-from src.docker_pull import pull_image
-from src.utils import RegistryInfo, Platform, compute_sha256
+from crpy.docker_pull import pull_image
+from crpy.utils import RegistryInfo, Platform, compute_sha256
 
 
 def test_pull_docker_io():
@@ -40,4 +40,4 @@ async def test_api_calls():
 
     image_layer = await ri.pull_layer(layers[0])
     sha_256_layer = compute_sha256(image_layer)
-    assert sha_256_layer == layers[0].lstrip("sha256:")
+    assert sha_256_layer == layers[0]

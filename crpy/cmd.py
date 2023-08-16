@@ -1,8 +1,9 @@
 import argparse
 import asyncio
+import os
 import sys
-from src.utils import RegistryInfo
-from src.storage import save_credentials
+from crpy.utils import RegistryInfo
+from crpy.storage import save_credentials
 
 
 async def _pull(args):
@@ -27,11 +28,12 @@ async def _login(args):
 
 def main(*args):
     parser = argparse.ArgumentParser(
-        prog="pydocker",
+        prog="crpy",
         description="Package that can do basic docker command like pull and push without installing the "
         "docker virtual machine",
         epilog="For reporting issues visit https://github.com/bvanelli/docker-pull-push",
     )
+    parser.add_argument("-p", "--proxy", nargs=1, help="Proxy for all requests.", default=None)
     subparsers = parser.add_subparsers()
     pull = subparsers.add_parser(
         "pull",
@@ -61,6 +63,10 @@ def main(*args):
     login.add_argument("--password", "-p", nargs="?", help="Password", default=None)
 
     arguments = parser.parse_args(args)
+
+    # if a proxy is set, use it on env variables
+    if arguments.proxy:
+        os.environ["HTTP_PROXY"] = os.environ["HTTPS_PROXY"] = arguments.proxy
 
     try:
         if not hasattr(arguments, "func"):
