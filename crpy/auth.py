@@ -1,6 +1,7 @@
-import requests
 from base64 import b64encode
 from functools import lru_cache
+
+import requests
 
 
 @lru_cache

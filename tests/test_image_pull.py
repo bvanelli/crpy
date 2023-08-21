@@ -1,8 +1,10 @@
 import io
 import tarfile
+
 import pytest
+
 from crpy.docker_pull import pull_image
-from crpy.utils import RegistryInfo, Platform, compute_sha256
+from crpy.utils import Platform, RegistryInfo, compute_sha256
 
 
 def test_pull_docker_io():

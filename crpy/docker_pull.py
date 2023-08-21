@@ -1,16 +1,17 @@
 import io
-import pathlib
-import tempfile
-import sys
-import os
-import shutil
-import tarfile
 import json
+import os
+import pathlib
+import shutil
+import sys
+import tarfile
+import tempfile
 from http.client import HTTPConnection, HTTPSConnection
 from typing import Union
+
 from crpy.auth import get_token, get_url_from_auth_header
-from crpy.utils import RegistryInfo
 from crpy.storage import get_config_dir
+from crpy.utils import RegistryInfo
 
 
 def get(url, headers_req: dict = None):
@@ -29,7 +30,7 @@ def get(url, headers_req: dict = None):
     r = h.getresponse()
 
     if hasattr(r, "headers"):  # Python 3
-        headers = dict((k.lower(), v) for k, v in dict(r.headers).items())
+        headers = {k.lower(): v for k, v in dict(r.headers).items()}
     else:  # Python 2
         headers = dict(r.getheaders())
     status = int(r.status)
@@ -113,9 +114,9 @@ def pull_image(image_url: str, output_file: Union[str, pathlib.Path, io.BytesIO]
             json.dump(manifest, outfile)
 
         if isinstance(output_file, io.BytesIO):
-            output_kwargs = dict(fileobj=output_file, mode="w")
+            output_kwargs = {"fileobj": output_file, "mode": "w"}
         else:
-            output_kwargs = dict(name=output_file, mode="w")
+            output_kwargs = {"name": output_file, "mode": "w"}
         with tarfile.open(**output_kwargs) as tar_out:
             os.chdir(temp_dir)
             tar_out.add(".")

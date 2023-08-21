@@ -1,5 +1,5 @@
-from crpy.utils import RegistryInfo
 from crpy.auth import get_url_from_auth_header
+from crpy.utils import RegistryInfo
 
 
 def test_parse_registry_url():

@@ -1,19 +1,19 @@
+import enum
 import hashlib
+import io
 import json
 import os
 import pathlib
-import enum
 import tarfile
 import tempfile
+from dataclasses import dataclass
+from typing import List, Optional, Union
 
 import aiohttp
-from dataclasses import dataclass
-from crpy.auth import get_token, get_url_from_auth_header
-from crpy.storage import get_credentials
-from typing import Optional, Union, List
-import io
 from async_lru import alru_cache
 
+from crpy.auth import get_token, get_url_from_auth_header
+from crpy.storage import get_credentials, get_layer_path, save_layer
 
 # taken from https://github.com/davedoesdev/dxf/blob/master/dxf/__init__.py#L24
 _schema1_mimetype = "application/vnd.docker.distribution.manifest.v1+json"
@@ -163,7 +163,7 @@ class RegistryInfo:
         )
         if not has_scheme and possibly_hub_image:
             # when user provides a single word like "alpine" or "alpine:latest" or bitnami/postgresql
-            registry, repository_raw = "index.docker.io", f"library/{url}"
+            registry, repository_raw = "index.docker.io", f"library/{url}" if "/" not in url else url
         else:
             registry, repository_raw = url.split("/", 1)
             if "docker.io" in registry and "/" not in repository_raw:
@@ -254,13 +254,46 @@ class RegistryInfo:
         layers = [m["digest"] for m in manifest["layers"]]
         return layers
 
-    async def pull_layer(self, layer: str, file_obj: Union[io.BytesIO, None] = None) -> Optional[bytes]:
+    async def pull_layer(
+        self, layer: str, file_obj: Optional[io.BytesIO] = None, use_cache: bool = True
+    ) -> Optional[bytes]:
+        content = self.get_content_from_cache(layer) if use_cache else None
+
+        if content is not None:
+            return self.handle_content(content, file_obj)
+
+        return await self.get_content_from_remote(layer, file_obj, use_cache)
+
+    def get_content_from_cache(self, layer: str) -> Optional[bytes]:
+        layer_path = get_layer_path(layer)
+        if layer_path:
+            print(f"Using cache for layer {layer.split(':')[1][0:12]}")
+            return layer_path.read_bytes()
+        return None
+
+    def handle_content(self, content: bytes, file_obj: Optional[io.BytesIO]) -> Optional[bytes]:
+        if file_obj is None:
+            return content
+        file_obj.write(content)
+        return None
+
+    async def get_content_from_remote(
+        self, layer: str, file_obj: Optional[io.BytesIO], use_cache: bool
+    ) -> Optional[bytes]:
+        content = await self.get_response_content(layer, file_obj)
+        if use_cache:
+            save_layer(layer, content if file_obj is None else file_obj.getvalue())
+        return content
+
+    async def get_response_content(self, layer: str, file_obj: Optional[io.BytesIO]) -> bytes:
         if file_obj is None:
             response = await _request(f"{self.blobs_url()}/{layer}", self._headers, method="get")
             return response.data
-        else:
-            async for chunk in _stream(f"{self.blobs_url()}/{layer}", self._headers):
-                file_obj.write(chunk)
+
+        async for chunk in _stream(f"{self.blobs_url()}/{layer}", self._headers):
+            file_obj.write(chunk)
+        file_obj.seek(0)
+        return file_obj.getvalue()
 
     async def pull(self, output_file: Union[str, pathlib.Path, io.BytesIO], architecture: Union[str, Platform] = None):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -276,21 +309,21 @@ class RegistryInfo:
             for layer in await self.get_layers():
                 layer_folder = layer.split(":")[-1]
                 path = layer_folder + "/layer.tar"
-                layer_bytes = await self.pull_layer(layer)
+                layer_bytes = await self.pull_layer(layer, use_cache=True)
                 os.makedirs(f"{temp_dir}/{layer_folder}", exist_ok=True)
                 with open(f"{temp_dir}/{path}", "wb") as f:
                     f.write(layer_bytes)
                 layer_path_l.append(path)
-                print(f"{layer[0:12]}: Pull complete")
+                print(f"{layer.split(':')[1][0:12]}: Pull complete")
 
             manifest = [{"Config": config_filename, "RepoTags": [str(self)], "Layers": layer_path_l}]
             with open(f"{temp_dir}/manifest.json", "w") as outfile:
                 json.dump(manifest, outfile)
 
             if isinstance(output_file, io.BytesIO):
-                output_kwargs = dict(fileobj=output_file, mode="w")
+                output_kwargs = {"fileobj": output_file, "mode": "w"}
             else:
-                output_kwargs = dict(name=output_file, mode="w")
+                output_kwargs = {"name": output_file, "mode": "w"}
             with tarfile.open(**output_kwargs) as tar_out:
                 os.chdir(temp_dir)
                 tar_out.add(".")
@@ -311,13 +344,19 @@ class RegistryInfo:
             "digest": digest,
         }
         # first check if a blob exists with a HEAD request
-        response = await _request(f"{self.blobs_url()}/{digest}", method="head")
+        response = await _request(f"{self.blobs_url()}/{digest}", headers=self._headers, method="head")
+        if response.status == 401:
+            www_auth = response.headers["WWW-Authenticate"].replace("pull", "pull,push")
+            await self.auth(www_auth)
+            response = await _request(f"{self.blobs_url()}/{digest}", headers=self._headers, method="get")
+            if response.status == 401:
+                raise ValueError(f"Could not authenticate to registry {self}")
         if response.status == 200 and not force:
             # layer already exists
             manifest["existing"] = True
             return manifest
         # the process for pushing a layer is first making a request to /uploads and getting the location header
-        response = await _request(f"{self.blobs_url()}/uploads/")
+        response = await _request(f"{self.blobs_url()}/uploads/", headers=self._headers)
         location_header = response.headers["Location"]
         # we do a monolith upload with a single PUT requests
         response = await _request(
@@ -391,5 +430,6 @@ class RegistryInfo:
             # once the blobs are committed, we can push the manifest
             image_manifest = self.build_manifest(config_manifest, layers_manifest)
             r = await self.push_manifest(image_manifest)
-            image_digest = r.headers["Docker-Content-Digest"]
+            # some registries like docker hub return the header in lower case
+            image_digest = r.headers.get("Docker-Content-Digest", "") or r.headers.get("docker-content-digest")
             print(f"Pushed {self.tag}: digest: {image_digest}")

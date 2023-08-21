@@ -1,4 +1,5 @@
 import pytest
+
 from crpy.utils import RegistryInfo
 
 

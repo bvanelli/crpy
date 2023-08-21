@@ -1,9 +1,9 @@
 import json
 import os
 import pathlib
-from typing import Optional
 from base64 import b64encode
 from functools import lru_cache
+from typing import Optional
 
 
 @lru_cache
@@ -47,3 +47,20 @@ def save_credentials(url: str, username: str, password: str):
     token = b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
     creds["auths"][url] = {"auth": token}
     get_config_file().write_text(json.dumps(creds, indent=2))
+
+
+def get_layer_path(layer: str) -> Optional[pathlib.Path]:
+    cache_dir = get_config_dir() / "blobs/"
+    os.makedirs(cache_dir, exist_ok=True)
+    layer_path = cache_dir / layer.replace(":", "_")
+    if layer_path.is_file():
+        return layer_path
+    return None
+
+
+def save_layer(layer: str, layer_data: bytes):
+    cache_dir = get_config_dir() / "blobs/"
+    os.makedirs(cache_dir, exist_ok=True)
+    layer_path = cache_dir / layer.replace(":", "_")
+    with open(layer_path, mode="wb") as file:
+        file.write(layer_data)

@@ -5,15 +5,17 @@
 # * Check if the layer already exists with a HEAD request
 # * Handle Authentification
 
-from tempfile import mkdtemp
-import tarfile
-import sys
-import os
 import hashlib
 import json
-from os.path import join
+import os
 import shutil
+import sys
+import tarfile
+from os.path import join
+from tempfile import mkdtemp
+
 import requests
+
 from crpy.utils import RegistryInfo
 
 
