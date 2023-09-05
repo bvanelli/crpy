@@ -1,5 +1,5 @@
 from crpy.auth import get_url_from_auth_header
-from crpy.utils import RegistryInfo
+from crpy.registry import RegistryInfo
 
 
 def test_parse_registry_url():
@@ -24,7 +24,7 @@ def test_parse_registry_url():
     assert str(alpine) == "index.docker.io/library/alpine:latest"
     # check if it also works when providing user specific images
     bitnami = RegistryInfo.from_url("bitnami/postgresql")
-    assert str(bitnami) == "index.docker.io/library/bitnami/postgresql:latest"
+    assert str(bitnami) == "index.docker.io/bitnami/postgresql:latest"
 
 
 def test_url_from_auth():

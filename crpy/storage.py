@@ -64,3 +64,11 @@ def save_layer(layer: str, layer_data: bytes):
     layer_path = cache_dir / layer.replace(":", "_")
     with open(layer_path, mode="wb") as file:
         file.write(layer_data)
+
+
+def get_layer_from_cache(layer: str) -> Optional[bytes]:
+    layer_path = get_layer_path(layer)
+    if layer_path:
+        print(f"Using cache for layer {layer.split(':')[1][0:12]}")
+        return layer_path.read_bytes()
+    return None

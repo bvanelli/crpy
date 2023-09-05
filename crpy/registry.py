@@ -1,19 +1,25 @@
-import enum
-import hashlib
 import io
 import json
 import os
 import pathlib
+import re
 import tarfile
 import tempfile
 from dataclasses import dataclass
 from typing import List, Optional, Union
 
-import aiohttp
 from async_lru import alru_cache
 
 from crpy.auth import get_token, get_url_from_auth_header
-from crpy.storage import get_credentials, get_layer_path, save_layer
+from crpy.common import (
+    Platform,
+    Response,
+    _request,
+    _stream,
+    compute_sha256,
+    platform_from_dict,
+)
+from crpy.storage import get_credentials, get_layer_from_cache, save_layer
 
 # taken from https://github.com/davedoesdev/dxf/blob/master/dxf/__init__.py#L24
 _schema1_mimetype = "application/vnd.docker.distribution.manifest.v1+json"
@@ -25,63 +31,6 @@ _schema2_list_mimetype = "application/vnd.docker.distribution.manifest.list.v2+j
 _ociv1_manifest_mimetype = "application/vnd.oci.image.manifest.v1+json"
 # OCIv1 equivalent of a docker registry v2 "manifests list"
 _ociv1_index_mimetype = "application/vnd.oci.image.index.v1+json"
-
-
-@dataclass
-class Response:
-    status: int
-    data: bytes
-    headers: Optional[dict] = None
-
-    def json(self) -> dict:
-        return json.loads(self.data)
-
-
-async def _request(
-    url, headers: dict = None, params: dict = None, data: Union[dict, bytes] = None, method: str = "post"
-) -> Response:
-    async with aiohttp.ClientSession(trust_env=True) as session:
-        method_fn = getattr(session, method)
-        async with method_fn(url, headers=headers, params=params, data=data) as response:
-            return Response(response.status, await response.read(), dict(response.headers))
-
-
-async def _stream(url, headers: dict = None):
-    async with aiohttp.ClientSession(trust_env=True) as session:
-        async with session.get(url, headers=headers) as response:
-            async for data, _ in response.content.iter_chunks():
-                yield data
-
-
-def compute_sha256(file: Union[str, io.BytesIO, bytes]):
-    # If input is a string, consider it a filename
-    if isinstance(file, str):
-        with open(file, "rb") as f:
-            content = f.read()
-    # If input is BytesIO, get value directly
-    elif isinstance(file, io.BytesIO):
-        content = file.getvalue()
-    elif isinstance(file, bytes):
-        content = file
-    else:
-        raise TypeError("Invalid input type.")
-
-    # Compute the sha256 hash
-    sha256_hash = hashlib.sha256(content).hexdigest()
-
-    return f"sha256:{sha256_hash}"
-
-
-class Platform(enum.Enum):
-    LINUX = "linux/amd64"
-    MAC = "linux/arm64/v8"
-
-
-def platform_from_dict(platform: dict):
-    base_str = f"{platform.get('os')}/{platform.get('architecture')}"
-    if "variant" in platform:
-        base_str += f"/{platform.get('variant')}"
-    return base_str
 
 
 @dataclass
@@ -103,13 +52,15 @@ class RegistryInfo:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
-    def manifest_url(self):
+    def v2_url(self):
         method = "https" if self.https else "http"
-        return f"{method}://{self.registry}/v2/{self.repository}/manifests/{self.tag}"
+        return f"{method}://{self.registry}/v2"
+
+    def manifest_url(self):
+        return f"{self.v2_url()}/{self.repository}/manifests/{self.tag}"
 
     def blobs_url(self):
-        method = "https" if self.https else "http"
-        return f"{method}://{self.registry}/v2/{self.repository}/blobs"
+        return f"{self.v2_url()}/{self.repository}/blobs"
 
     def __hash__(self):
         return hash((self.registry, self.registry, self.tag, self.https))
@@ -127,7 +78,7 @@ class RegistryInfo:
         if not b64_token:
             b64_token = get_credentials(self.registry)
         # reuse this token in consecutive requests
-        self.token = get_token(
+        self.token = await get_token(
             get_url_from_auth_header(www_auth), username=username, password=password, b64_token=b64_token
         )
         print(f"Authenticated at {self}")
@@ -156,7 +107,7 @@ class RegistryInfo:
             has_scheme = True
         else:
             scheme, has_scheme = "https", False
-        possibly_hub_image = url.count("/") == 0 or (  # example: alpine:latest
+        possibly_hub_image = (url.count("/") == 0 and "." not in url.split("/")[0]) or (  # example: alpine:latest
             url.count("/") == 1  # example: bitnami/postgres:latest
             and "." not in url.split("/")[0]  # exception: myregistry.com/alpine:latest
             and ":" not in url.split("/")[0]  # exception: localhost:5000/alpine:latest
@@ -165,7 +116,7 @@ class RegistryInfo:
             # when user provides a single word like "alpine" or "alpine:latest" or bitnami/postgresql
             registry, repository_raw = "index.docker.io", f"library/{url}" if "/" not in url else url
         else:
-            registry, repository_raw = url.split("/", 1)
+            registry, _, repository_raw = url.partition("/")
             if "docker.io" in registry and "/" not in repository_raw:
                 # library image
                 repository_raw = f"library/{repository_raw}"
@@ -257,25 +208,16 @@ class RegistryInfo:
     async def pull_layer(
         self, layer: str, file_obj: Optional[io.BytesIO] = None, use_cache: bool = True
     ) -> Optional[bytes]:
-        content = self.get_content_from_cache(layer) if use_cache else None
+        content = get_layer_from_cache(layer) if use_cache else None
 
         if content is not None:
-            return self.handle_content(content, file_obj)
+            # short-circuit if the content is in the cache
+            if file_obj is None:
+                return content
+            file_obj.write(content)
+            return None
 
         return await self.get_content_from_remote(layer, file_obj, use_cache)
-
-    def get_content_from_cache(self, layer: str) -> Optional[bytes]:
-        layer_path = get_layer_path(layer)
-        if layer_path:
-            print(f"Using cache for layer {layer.split(':')[1][0:12]}")
-            return layer_path.read_bytes()
-        return None
-
-    def handle_content(self, content: bytes, file_obj: Optional[io.BytesIO]) -> Optional[bytes]:
-        if file_obj is None:
-            return content
-        file_obj.write(content)
-        return None
 
     async def get_content_from_remote(
         self, layer: str, file_obj: Optional[io.BytesIO], use_cache: bool
@@ -391,7 +333,7 @@ class RegistryInfo:
         assert response.status == 201
         return response
 
-    async def push(self, input_file: Union[str, pathlib.Path, io.BytesIO], architecture: Union[str, Platform] = None):
+    async def push(self, input_file: Union[str, pathlib.Path, io.BytesIO]):
         try:
             if isinstance(input_file, io.BytesIO):
                 t = tarfile.TarFile(fileobj=input_file)
@@ -433,3 +375,52 @@ class RegistryInfo:
             # some registries like docker hub return the header in lower case
             image_digest = r.headers.get("Docker-Content-Digest", "") or r.headers.get("docker-content-digest")
             print(f"Pushed {self.tag}: digest: {image_digest}")
+
+    async def _list(self, path: str, last: str = None, n: int = None, lazy: bool = False) -> List[dict]:
+        url = f"{self.v2_url()}/{path}"
+        params = {}
+        if n is not None:
+            params["n"] = n
+        if last is not None:
+            params["last"] = last
+        response = await _request(url, params=params, headers=self._headers, method="get")
+        if response.status == 401:
+            www_auth = response.headers["WWW-Authenticate"]
+            await self.auth(www_auth)
+            response = await _request(url, params=params, headers=self._headers, method="get")
+            if response.status == 401:
+                raise ValueError(f"Could not authenticate to registry {self}")
+        ret_value = [response.json()]
+        # use pagination to get further tags, if any
+        if "Link" in response.headers and not lazy:
+            last = re.search(r"last=(\w+)", response.headers["Link"]).group(1)
+            n = re.search(r"n=(\d+)", response.headers["Link"]).group(1)
+            next_response = await self._list(path, last, int(n))
+            ret_value.append(next_response[0])
+        return ret_value
+
+    async def list_repositories(self, last: str = None, n: int = None, lazy: bool = False) -> List[str]:
+        """
+        Lists the repositories contents to show all available images. It will retrieve all pages, unless lazy is
+        specified. In order to list, the user token must have the appropriate permissions.
+
+        :param last: Last element received on the previous page, in case of a paged call. ``None`` means from beginning.
+        :param n: Number of elements on each page. ``None`` means default from registry.
+        :param lazy: If lazy retrieval should be used. In this case, the
+        :return: List of repositories available in the registry.
+        """
+        response = await self._list("_catalog", last, n, lazy)
+        return [entry for page in response for entry in page["repositories"]]
+
+    async def list_tags(self, last: str = None, n: int = None, lazy: bool = False) -> List[str]:
+        """
+        Lists the tags available for the repository. It will retrieve all pages, unless lazy is
+        specified. In order to list, the user token must have the appropriate permissions.
+
+        :param last: Last element received on the previous page, in case of a paged call. ``None`` means from beginning.
+        :param n: Number of elements on each page. ``None`` means default from registry.
+        :param lazy: If lazy retrieval should be used. In this case, the
+        :return: List of tags available in the repository.
+        """
+        response = await self._list(f"{self.repository}/tags/list", last, n, lazy)
+        return [entry for page in response for entry in page["tags"]]

@@ -3,13 +3,15 @@ import tarfile
 
 import pytest
 
-from crpy.docker_pull import pull_image
-from crpy.utils import Platform, RegistryInfo, compute_sha256
+from crpy.common import Platform, compute_sha256
+from crpy.registry import RegistryInfo
 
 
-def test_pull_docker_io():
+@pytest.mark.asyncio
+async def test_pull_docker_io():
     file = io.BytesIO()
-    pull_image("index.docker.io/library/alpine:3.18.2", file)
+    ri = RegistryInfo.from_url("index.docker.io/library/alpine:3.18.2")
+    await ri.pull(file)
     file.seek(0)
     with tarfile.open(fileobj=file, mode="r") as tf:
         content = tf.getnames()

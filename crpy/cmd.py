@@ -2,9 +2,11 @@ import argparse
 import asyncio
 import os
 import sys
+from getpass import getpass
 
+from crpy.common import UnauthorizedError
+from crpy.registry import RegistryInfo
 from crpy.storage import save_credentials
-from crpy.utils import RegistryInfo
 
 
 async def _pull(args):
@@ -21,7 +23,7 @@ async def _login(args):
     if args.username is None:
         args.username = input("Username: ")
     if args.password is None:
-        args.password = input("Password: ")
+        args.password = getpass("Password: ")
     ri = RegistryInfo.from_url(args.url)
     await ri.auth(username=args.username, password=args.password)
     save_credentials(ri.registry, args.username, args.password)
@@ -63,7 +65,7 @@ def main(*args):
     login.add_argument("--username", "-u", nargs="?", help="Username", default=None)
     login.add_argument("--password", "-p", nargs="?", help="Password", default=None)
 
-    arguments = parser.parse_args(args)
+    arguments = parser.parse_args(args if args else None)
 
     # if a proxy is set, use it on env variables
     if arguments.proxy:
@@ -74,7 +76,7 @@ def main(*args):
             parser.print_help()
         else:
             asyncio.run(arguments.func(arguments))
-    except (AssertionError, ValueError, KeyboardInterrupt) as e:
+    except (AssertionError, ValueError, UnauthorizedError, KeyboardInterrupt) as e:
         print(f"{e}")
         sys.exit(-1)
 

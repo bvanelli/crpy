@@ -1,11 +1,12 @@
 from base64 import b64encode
-from functools import lru_cache
 
-import requests
+from async_lru import alru_cache
+
+from crpy.common import UnauthorizedError, _request
 
 
-@lru_cache
-def get_token(
+@alru_cache
+async def get_token(
     url: str,
     username: str = None,
     password: str = None,
@@ -15,13 +16,13 @@ def get_token(
     # I'll use the simple auth since it mostly works
     headers = {}
     if username and password:
-        username, password = "", ""
         token = b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
         headers = {"Authorization": f"Basic {token}"}
     elif b64_token:
         headers = {"Authorization": f"Basic {b64_token}"}
-    token_req = requests.get(url, headers=headers)
-    token_req.raise_for_status()
+    token_req = await _request(url, headers=headers, method="get")
+    if token_req.status in (401, 403):
+        raise UnauthorizedError(f"Could not authenticate at registry {url}")
     req_json = token_req.json()
     if "token" in req_json:
         return req_json["token"]
