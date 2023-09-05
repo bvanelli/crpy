@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 import os
 import sys
 from getpass import getpass
@@ -27,6 +28,38 @@ async def _login(args):
     ri = RegistryInfo.from_url(args.url)
     await ri.auth(username=args.username, password=args.password)
     save_credentials(ri.registry, args.username, args.password)
+
+
+async def _inspect_manifest(args):
+    ri = RegistryInfo.from_url(args.url)
+    manifest = await ri.get_manifest_from_architecture()
+    print(json.dumps(manifest, indent=2))
+
+
+async def _inspect_config(args):
+    ri = RegistryInfo.from_url(args.url)
+    raw_config = await ri.get_config()
+    config = json.loads(raw_config.data)
+    if not args.short:
+        json.dumps(config, indent=2)
+    else:
+        for entry in config["history"]:
+            print(entry["created_by"])
+
+
+async def _inspect_layer(args):
+    ri = RegistryInfo.from_url(args.url)
+    layers = await ri.get_layers()
+    ref = args.layer_reference[0]
+    try:
+        ref_int = int(ref)
+        layer = layers[ref_int]
+        sys.stdout.buffer.write(await ri.pull_layer(layer))
+    except ValueError:
+        for layer in layers:
+            if ref in layer:
+                sys.stdout.buffer.write(await ri.pull_layer(layer))
+                break
 
 
 def main(*args):
@@ -64,6 +97,37 @@ def main(*args):
     )
     login.add_argument("--username", "-u", nargs="?", help="Username", default=None)
     login.add_argument("--password", "-p", nargs="?", help="Password", default=None)
+
+    inspect = subparsers.add_parser(
+        "inspect",
+        help="Inspects a docker registry metadata. It can inspect configs, manifests and layers.",
+    )
+    inspect_subparser = inspect.add_subparsers()
+    # manifest
+    manifest = inspect_subparser.add_parser("manifest", help="Inspects a docker registry metadata.")
+    manifest.add_argument("url", nargs="?", help="Remote repository url.")
+    manifest.set_defaults(func=_inspect_manifest)
+    # config
+    config = inspect_subparser.add_parser("config", help="Inspects a docker registry metadata.")
+    config.add_argument("url", nargs="?", help="Remote repository url.")
+    config.set_defaults(func=_inspect_config, short=False)
+    # commands
+    commands = inspect_subparser.add_parser(
+        "commands",
+        help="Inspects a docker registry build commands. "
+        "These are the same as when you check individual image layers on Docker hub.",
+    )
+    commands.add_argument("url", nargs="?", help="Remote repository url.")
+    commands.set_defaults(func=_inspect_config, short=True)
+    # layer
+    layer = inspect_subparser.add_parser("layer", help="Inspects a docker registry layer.")
+    layer.add_argument("url", nargs="?", help="Remote repository url.")
+    layer.add_argument(
+        "layer_reference",
+        nargs=1,
+        help="Integer representing the layer position, full or partial hash.",
+    )
+    layer.set_defaults(func=_inspect_layer)
 
     arguments = parser.parse_args(args if args else None)
 
