@@ -4,6 +4,8 @@ setup(
     name="crpy",
     packages=find_packages(),
     description="Simple and straight forward wrapper for container registry API.",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
     author="Brunno Vanelli",
     author_email="brunnovanelli@gmail.com",
     url="https://github.com/bvanelli/docker-pull-push",
