@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Union
 
 from async_lru import alru_cache
+from rich import print
 
 from crpy.auth import get_token, get_url_from_auth_header
 from crpy.common import (

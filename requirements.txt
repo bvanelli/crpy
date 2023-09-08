@@ -2,3 +2,4 @@ requests>=2
 async-lru>=2
 aiohttp>=3
 async-lru>=2
+rich>=13.5

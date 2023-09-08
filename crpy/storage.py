@@ -5,6 +5,8 @@ from base64 import b64encode
 from functools import lru_cache
 from typing import Optional
 
+from rich import print
+
 
 @lru_cache
 def get_config_dir() -> pathlib.Path:
@@ -31,7 +33,7 @@ def get_config() -> dict:
         config = json.loads(config_file.read_text())
         return config
     except json.JSONDecodeError:
-        print(f"Could not read config file at {config_file}: JSON is invalid")
+        print(f"[red]Could not read config file at {config_file}: JSON is invalid[red]")
         return {}
 
 

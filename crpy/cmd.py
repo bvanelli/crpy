@@ -5,18 +5,20 @@ import os
 import sys
 from getpass import getpass
 
+from rich import print
+
 from crpy.common import UnauthorizedError
 from crpy.registry import RegistryInfo
 from crpy.storage import save_credentials
 
 
 async def _pull(args):
-    ri = RegistryInfo.from_url(args.url)
+    ri = RegistryInfo.from_url(args.url[0])
     await ri.pull(args.filename)
 
 
 async def _push(args):
-    ri = RegistryInfo.from_url(args.url)
+    ri = RegistryInfo.from_url(args.url[0])
     await ri.push(args.filename)
 
 
@@ -31,24 +33,24 @@ async def _login(args):
 
 
 async def _inspect_manifest(args):
-    ri = RegistryInfo.from_url(args.url)
+    ri = RegistryInfo.from_url(args.url[0])
     manifest = await ri.get_manifest_from_architecture()
-    print(json.dumps(manifest, indent=2))
+    print(manifest)
 
 
 async def _inspect_config(args):
-    ri = RegistryInfo.from_url(args.url)
+    ri = RegistryInfo.from_url(args.url[0])
     raw_config = await ri.get_config()
     config = json.loads(raw_config.data)
     if not args.short:
-        json.dumps(config, indent=2)
+        print(config)
     else:
         for entry in config["history"]:
             print(entry["created_by"])
 
 
 async def _inspect_layer(args):
-    ri = RegistryInfo.from_url(args.url)
+    ri = RegistryInfo.from_url(args.url[0])
     layers = await ri.get_layers()
     ref = args.layer_reference[0]
     try:
@@ -60,6 +62,20 @@ async def _inspect_layer(args):
             if ref in layer:
                 sys.stdout.buffer.write(await ri.pull_layer(layer))
                 break
+
+
+async def _repositories(args):
+    ri = RegistryInfo.from_url(args.url[0])
+    for entry in await ri.list_repositories():
+        print(entry)
+
+
+async def _tags(args):
+    ri = RegistryInfo.from_url(args.url[0])
+    if not ri.repository:
+        raise ValueError("Repository must be provided to list tags!")
+    for entry in await ri.list_tags():
+        print(entry)
 
 
 def main(*args):
@@ -76,8 +92,8 @@ def main(*args):
         help="Pulls a docker image from a remove repo.",
     )
     pull.set_defaults(func=_pull)
-    pull.add_argument("url", nargs="?", help="Remote repository to pull from.")
-    pull.add_argument("filename", nargs="?", help="Output file for the compressed image.")
+    pull.add_argument("url", nargs=1, help="Remote repository to pull from.")
+    pull.add_argument("filename", nargs=1, help="Output file for the compressed image.")
 
     push = subparsers.add_parser(
         "push",
@@ -85,7 +101,7 @@ def main(*args):
     )
     push.set_defaults(func=_push)
     push.add_argument("filename", nargs="?", help="File containing the docker image to be pushed.")
-    push.add_argument("url", nargs="?", help="Remote repository to push to.")
+    push.add_argument("url", nargs=1, help="Remote repository to push to.")
 
     login = subparsers.add_parser("login", help="Logs in on a remote repo")
     login.set_defaults(func=_login)
@@ -105,11 +121,11 @@ def main(*args):
     inspect_subparser = inspect.add_subparsers()
     # manifest
     manifest = inspect_subparser.add_parser("manifest", help="Inspects a docker registry metadata.")
-    manifest.add_argument("url", nargs="?", help="Remote repository url.")
+    manifest.add_argument("url", nargs=1, help="Remote repository url.")
     manifest.set_defaults(func=_inspect_manifest)
     # config
     config = inspect_subparser.add_parser("config", help="Inspects a docker registry metadata.")
-    config.add_argument("url", nargs="?", help="Remote repository url.")
+    config.add_argument("url", nargs=1, help="Remote repository url.")
     config.set_defaults(func=_inspect_config, short=False)
     # commands
     commands = inspect_subparser.add_parser(
@@ -117,17 +133,24 @@ def main(*args):
         help="Inspects a docker registry build commands. "
         "These are the same as when you check individual image layers on Docker hub.",
     )
-    commands.add_argument("url", nargs="?", help="Remote repository url.")
+    commands.add_argument("url", nargs=1, help="Remote repository url.")
     commands.set_defaults(func=_inspect_config, short=True)
     # layer
     layer = inspect_subparser.add_parser("layer", help="Inspects a docker registry layer.")
-    layer.add_argument("url", nargs="?", help="Remote repository url.")
+    layer.add_argument("url", nargs=1, help="Remote repository url.")
     layer.add_argument(
         "layer_reference",
         nargs=1,
         help="Integer representing the layer position, full or partial hash.",
     )
     layer.set_defaults(func=_inspect_layer)
+    # repositories and tags
+    repositories = subparsers.add_parser("repositories", help="List the repositories on the registry.")
+    repositories.add_argument("url", nargs=1, help="Remote repository url.")
+    repositories.set_defaults(func=_repositories)
+    tags = subparsers.add_parser("tags", help="List the tags on a repository.")
+    tags.add_argument("url", nargs=1, help="Remote repository url.")
+    tags.set_defaults(func=_tags)
 
     arguments = parser.parse_args(args if args else None)
 
@@ -141,7 +164,7 @@ def main(*args):
         else:
             asyncio.run(arguments.func(arguments))
     except (AssertionError, ValueError, UnauthorizedError, KeyboardInterrupt) as e:
-        print(f"{e}")
+        print(f"[red]{e}[red]", file=sys.stderr)
         sys.exit(-1)
 
 
