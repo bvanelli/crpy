@@ -7,3 +7,4 @@ docker-push-tmp
 base
 build/
 *.egg-info/
+.DS_Store

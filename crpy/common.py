@@ -19,17 +19,27 @@ class Response:
 
 
 async def _request(
-    url, headers: dict = None, params: dict = None, data: Union[dict, bytes] = None, method: str = "post"
+    url,
+    headers: dict = None,
+    params: dict = None,
+    data: Union[dict, bytes] = None,
+    method: str = "post",
+    aiohttp_kwargs: dict = None,
 ) -> Response:
-    async with aiohttp.ClientSession(trust_env=True) as session:
-        method_fn = getattr(session, method)
-        async with method_fn(url, headers=headers, params=params, data=data) as response:
-            return Response(response.status, await response.read(), dict(response.headers))
+    aiohttp_kwargs = aiohttp_kwargs or {}
+    try:
+        async with aiohttp.ClientSession(trust_env=True) as session:
+            method_fn = getattr(session, method)
+            async with method_fn(url, headers=headers, params=params, data=data, **aiohttp_kwargs) as response:
+                return Response(response.status, await response.read(), dict(response.headers))
+    except aiohttp.ClientConnectionError as e:
+        raise HTTPConnectionError(str(e))
 
 
-async def _stream(url, headers: dict = None):
-    async with aiohttp.ClientSession(trust_env=True) as session:
-        async with session.get(url, headers=headers) as response:
+async def _stream(url, headers: dict = None, aiohttp_kwargs: dict = None):
+    aiohttp_kwargs = aiohttp_kwargs or {}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, **aiohttp_kwargs) as response:
             async for data, _ in response.content.iter_chunks():
                 yield data
 
@@ -66,5 +76,13 @@ def platform_from_dict(platform: dict):
 
 
 # exceptions
-class UnauthorizedError(Exception):
+class BaseCrpyError(Exception):
+    pass
+
+
+class UnauthorizedError(BaseCrpyError):
+    pass
+
+
+class HTTPConnectionError(BaseCrpyError):
     pass

@@ -45,3 +45,10 @@ async def test_api_calls():
     image_layer = await ri.pull_layer(layers[0])
     sha_256_layer = compute_sha256(image_layer)
     assert sha_256_layer == layers[0]
+
+
+@pytest.mark.asyncio
+async def test_list_tags():
+    ri = RegistryInfo.from_url("index.docker.io/library/alpine")
+    tags = await ri.list_tags()
+    assert "3.18.2" in tags

@@ -7,19 +7,23 @@ from getpass import getpass
 
 from rich import print
 
-from crpy.common import UnauthorizedError
+from crpy.common import HTTPConnectionError, UnauthorizedError
 from crpy.registry import RegistryInfo
 from crpy.storage import save_credentials
 
 
 async def _pull(args):
     ri = RegistryInfo.from_url(args.url[0])
-    await ri.pull(args.filename)
+    filename = args.filename
+    if not filename:
+        # make file name compatible
+        filename = ri.repository.replace(":", "_").replace("/", "_")
+    await ri.pull(filename)
 
 
 async def _push(args):
     ri = RegistryInfo.from_url(args.url[0])
-    await ri.push(args.filename)
+    await ri.push(args.filename[0])
 
 
 async def _login(args):
@@ -78,12 +82,27 @@ async def _tags(args):
         print(entry)
 
 
+async def _delete(args):
+    ri = RegistryInfo.from_url(args.url[0])
+    if not ri.repository:
+        raise ValueError("Repository must be provided to list tags!")
+    r = await ri.delete_tag()
+    print(r.data)
+
+
 def main(*args):
     parser = argparse.ArgumentParser(
         prog="crpy",
         description="Package that can do basic docker command like pull and push without installing the "
         "docker virtual machine",
-        epilog="For reporting issues visit https://github.com/bvanelli/docker-pull-push",
+        epilog="For reporting issues visit https://github.com/bvanelli/crpy",
+    )
+    parser.add_argument(
+        "-k",
+        "--insecure",
+        action="store_true",
+        help="Use insecure registry. Ignores the validation of the certificate (useful for development registries).",
+        default=None,
     )
     parser.add_argument("-p", "--proxy", nargs=1, help="Proxy for all requests.", default=None)
     subparsers = parser.add_subparsers()
@@ -93,14 +112,14 @@ def main(*args):
     )
     pull.set_defaults(func=_pull)
     pull.add_argument("url", nargs=1, help="Remote repository to pull from.")
-    pull.add_argument("filename", nargs=1, help="Output file for the compressed image.")
+    pull.add_argument("filename", nargs="?", help="Output file for the compressed image.")
 
     push = subparsers.add_parser(
         "push",
         help="Pushes a docker image from a remove repo.",
     )
     push.set_defaults(func=_push)
-    push.add_argument("filename", nargs="?", help="File containing the docker image to be pushed.")
+    push.add_argument("filename", nargs=1, help="File containing the docker image to be pushed.")
     push.add_argument("url", nargs=1, help="Remote repository to push to.")
 
     login = subparsers.add_parser("login", help="Logs in on a remote repo")
@@ -151,6 +170,15 @@ def main(*args):
     tags = subparsers.add_parser("tags", help="List the tags on a repository.")
     tags.add_argument("url", nargs=1, help="Remote repository url.")
     tags.set_defaults(func=_tags)
+    # delete tag
+    delete = subparsers.add_parser("delete", help="Deletes a tag in a remote repo.")
+    delete.add_argument(
+        "url",
+        nargs=1,
+        help="Remote repository to login to. If no registry server is specified, the default used.",
+        default="index.docker.io",
+    )
+    delete.set_defaults(func=_delete)
 
     arguments = parser.parse_args(args if args else None)
 
@@ -163,7 +191,7 @@ def main(*args):
             parser.print_help()
         else:
             asyncio.run(arguments.func(arguments))
-    except (AssertionError, ValueError, UnauthorizedError, KeyboardInterrupt) as e:
+    except (AssertionError, ValueError, UnauthorizedError, HTTPConnectionError, KeyboardInterrupt) as e:
         print(f"[red]{e}[red]", file=sys.stderr)
         sys.exit(-1)
 

@@ -12,7 +12,7 @@ from rich import print
 def get_config_dir() -> pathlib.Path:
     cache_dir_root = os.path.expanduser("~")
     assert os.path.isdir(cache_dir_root)
-    cache_dir = cache_dir_root + "/.docker-pull-push/"
+    cache_dir = cache_dir_root + "/.crpy/"
     if not os.path.exists(cache_dir):
         print("Creating cache directory: " + cache_dir)
         os.makedirs(cache_dir)

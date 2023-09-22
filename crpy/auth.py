@@ -11,6 +11,7 @@ async def get_token(
     username: str = None,
     password: str = None,
     b64_token: str = None,
+    aiohttp_kwargs: dict = None,
 ):
     # get the credentials here.
     # I'll use the simple auth since it mostly works
@@ -20,7 +21,7 @@ async def get_token(
         headers = {"Authorization": f"Basic {token}"}
     elif b64_token:
         headers = {"Authorization": f"Basic {b64_token}"}
-    token_req = await _request(url, headers=headers, method="get")
+    token_req = await _request(url, headers=headers, method="get", aiohttp_kwargs=aiohttp_kwargs)
     if token_req.status in (401, 403):
         raise UnauthorizedError(f"Could not authenticate at registry {url}")
     req_json = token_req.json()
