@@ -383,7 +383,8 @@ class RegistryInfo:
         location_header = response.headers["Location"]
         # we do a monolith upload with a single PUT requests
         response = await self._request_with_auth(
-            f"{location_header}&digest={digest}",
+            location_header,
+            params={"digest": digest},
             method="put",
             data=content,
             headers={"Content-Type": "application/octet-stream"},
