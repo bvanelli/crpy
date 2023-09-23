@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://github.com/bvanelli/crpy/assets/8211602/29052a7f-759d-42ad-8ff2-dad8dcb8428e">
+</p>
+
 A python script to pull images from a Docker repository without installing Docker and its daemon.
 
 The script creates a cache directory (~/.crpy/) to store layers already downloaded.
