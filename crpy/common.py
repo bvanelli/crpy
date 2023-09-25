@@ -28,7 +28,7 @@ async def _request(
 ) -> Response:
     aiohttp_kwargs = aiohttp_kwargs or {}
     try:
-        async with aiohttp.ClientSession(trust_env=True) as session:
+        async with aiohttp.ClientSession() as session:
             method_fn = getattr(session, method)
             async with method_fn(url, headers=headers, params=params, data=data, **aiohttp_kwargs) as response:
                 return Response(response.status, await response.read(), dict(response.headers))

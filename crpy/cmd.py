@@ -234,10 +234,6 @@ def main(*args):
 
     arguments = parser.parse_args(args if args else None)
 
-    # if a proxy is set, use it on env variables
-    if arguments.proxy:
-        os.environ["HTTP_PROXY"] = os.environ["HTTPS_PROXY"] = arguments.proxy
-
     try:
         if not hasattr(arguments, "func"):
             parser.print_help()
