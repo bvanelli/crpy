@@ -1,15 +1,17 @@
+import functools
 import io
 import json
 import os
 import pathlib
 import re
+import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass
 from typing import List, Optional, Union
 
 from async_lru import alru_cache
-from rich import print
+from rich import print as rprint
 
 from crpy.auth import get_token, get_url_from_auth_header
 from crpy.common import (
@@ -32,6 +34,11 @@ _schema2_list_mimetype = "application/vnd.docker.distribution.manifest.list.v2+j
 _ociv1_manifest_mimetype = "application/vnd.oci.image.manifest.v1+json"
 # OCIv1 equivalent of a docker registry v2 "manifests list"
 _ociv1_index_mimetype = "application/vnd.oci.image.index.v1+json"
+
+
+# we redirect all print statements no stderr, so that piping on command line works as expected. You can then pipe the
+# results to jq or similar without interfering with the logging.
+print = functools.partial(rprint, file=sys.stderr)
 
 
 @dataclass
@@ -86,7 +93,7 @@ class RegistryInfo:
             headers = {}
         response = await _request(
             url,
-            headers | self._headers,
+            {**headers, **self._headers},
             params=params,
             data=data,
             method=method,
@@ -97,7 +104,7 @@ class RegistryInfo:
             await self.auth(www_auth)
             response = await _request(
                 url,
-                headers | self._headers,
+                {**headers, **self._headers},
                 params=params,
                 data=data,
                 method=method,
@@ -155,7 +162,7 @@ class RegistryInfo:
         return self.token
 
     @staticmethod
-    def from_url(url: str) -> "RegistryInfo":
+    def from_url(url: str, proxy: str = None, insecure: bool = False) -> "RegistryInfo":
         """
         Generates a RegistryInfo object from an url, automatically splitting the url into the dataclass fields.
 
@@ -194,7 +201,7 @@ class RegistryInfo:
                 # library image
                 repository_raw = f"library/{repository_raw}"
         name, tag = (repository_raw.split(":") + ["latest"])[:2]
-        return RegistryInfo(registry, name.strip("/"), tag, scheme == "https")
+        return RegistryInfo(registry, name.strip("/"), tag, scheme == "https", proxy=proxy, insecure=insecure)
 
     @alru_cache
     async def get_manifest(self, fat: bool = False) -> Response:
@@ -278,6 +285,7 @@ class RegistryInfo:
         content = get_layer_from_cache(layer) if use_cache else None
 
         if content is not None:
+            print(f"Using cache for layer {layer.split(':')[1][0:12]}")
             # short-circuit if the content is in the cache
             if file_obj is None:
                 return content
@@ -345,8 +353,10 @@ class RegistryInfo:
             else:
                 output_kwargs = {"name": output_file, "mode": "w"}
             with tarfile.open(**output_kwargs) as tar_out:
+                print(os.curdir)
                 os.chdir(temp_dir)
                 tar_out.add(".")
+                os.chdir("..")  # leave the folder, otherwise it might not be able to be deleted on windows
             print(f"Downloaded image from {self}")
 
     async def push_layer(self, file_obj: Union[bytes, str, pathlib.Path], force: bool = False) -> Optional[dict]:

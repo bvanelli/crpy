@@ -6,14 +6,20 @@ import sys
 from getpass import getpass
 
 from rich import print
+from rich.table import Table
 
 from crpy.common import HTTPConnectionError, UnauthorizedError
 from crpy.registry import RegistryInfo
-from crpy.storage import remove_credentials, save_credentials
+from crpy.storage import (
+    decode_credentials,
+    get_config,
+    remove_credentials,
+    save_credentials,
+)
 
 
 async def _pull(args):
-    ri = RegistryInfo.from_url(args.url[0])
+    ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     filename = args.filename
     if not filename:
         # make file name compatible
@@ -22,7 +28,7 @@ async def _pull(args):
 
 
 async def _push(args):
-    ri = RegistryInfo.from_url(args.url[0])
+    ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     await ri.push(args.filename[0])
 
 
@@ -31,7 +37,7 @@ async def _login(args):
         args.username = input("Username: ")
     if args.password is None:
         args.password = getpass("Password: ")
-    ri = RegistryInfo.from_url(args.url)
+    ri = RegistryInfo.from_url(args.url, proxy=args.proxy, insecure=args.insecure)
     await ri.auth(username=args.username, password=args.password)
     save_credentials(ri.registry, args.username, args.password)
 
@@ -50,13 +56,13 @@ async def _logout(args):
 
 
 async def _inspect_manifest(args):
-    ri = RegistryInfo.from_url(args.url[0])
+    ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     manifest = await ri.get_manifest_from_architecture()
     print(manifest)
 
 
 async def _inspect_config(args):
-    ri = RegistryInfo.from_url(args.url[0])
+    ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     raw_config = await ri.get_config()
     config = json.loads(raw_config.data)
     if not args.short:
@@ -67,7 +73,7 @@ async def _inspect_config(args):
 
 
 async def _inspect_layer(args):
-    ri = RegistryInfo.from_url(args.url[0])
+    ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     layers = await ri.get_layers()
     ref = args.layer_reference[0]
     try:
@@ -82,13 +88,13 @@ async def _inspect_layer(args):
 
 
 async def _repositories(args):
-    ri = RegistryInfo.from_url(args.url[0])
+    ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     for entry in await ri.list_repositories():
         print(entry)
 
 
 async def _tags(args):
-    ri = RegistryInfo.from_url(args.url[0])
+    ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     if not ri.repository:
         raise ValueError("Repository must be provided to list tags!")
     for entry in await ri.list_tags():
@@ -96,11 +102,27 @@ async def _tags(args):
 
 
 async def _delete(args):
-    ri = RegistryInfo.from_url(args.url[0])
+    ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     if not ri.repository:
         raise ValueError("Repository must be provided to list tags!")
     r = await ri.delete_tag()
     print(r.data)
+
+
+async def _auth(args):
+    config = get_config()
+
+    table = Table(title="Saved credentials", title_style="bold")
+    table.add_column("Index", style="blue")
+    table.add_column("Url", style="cyan", no_wrap=True)
+    table.add_column("Username", style="magenta")
+    table.add_column("Password", style="green")
+    for idx, (url, entry) in enumerate(config["auths"].items()):
+        username, password = decode_credentials(entry["auth"])
+        if not args.show_passwords:
+            password = f"{password[0:2]}***{password[-2:]}"
+        table.add_row(str(idx), url, username, password)
+    print(table)
 
 
 def main(*args):
@@ -115,9 +137,16 @@ def main(*args):
         "--insecure",
         action="store_true",
         help="Use insecure registry. Ignores the validation of the certificate (useful for development registries).",
+        default=False,
+    )
+    parser.add_argument(
+        "-p",
+        "--proxy",
+        nargs=1,
+        help="Proxy for all requests. If your proxy contains authentication, pass it on the request in the usual "
+             "format \"http://user:pass@some.proxy.com\"",
         default=None,
     )
-    parser.add_argument("-p", "--proxy", nargs=1, help="Proxy for all requests.", default=None)
     subparsers = parser.add_subparsers()
     pull = subparsers.add_parser(
         "pull",
@@ -135,6 +164,7 @@ def main(*args):
     push.add_argument("filename", nargs=1, help="File containing the docker image to be pushed.")
     push.add_argument("url", nargs=1, help="Remote repository to push to.")
 
+    # authentication
     login = subparsers.add_parser("login", help="Logs in on a remote repo")
     login.set_defaults(func=_login)
     login.add_argument(
@@ -150,21 +180,26 @@ def main(*args):
     logout.add_argument("url", nargs="?", help="Remote repository to logout from.", default="index.docker.io")
     logout.set_defaults(func=_logout)
 
-    inspect = subparsers.add_parser(
-        "inspect",
-        help="Inspects a docker registry metadata. It can inspect configs, manifests and layers.",
+    auth = subparsers.add_parser("auth", help="Shows authenticated repositories")
+    auth.add_argument(
+        "--show-passwords",
+        "-s",
+        action="store_true",
+        default=False,
+        help="If the password or token should be shown in clear text.",
     )
-    inspect_subparser = inspect.add_subparsers()
+    auth.set_defaults(func=_auth)
+
     # manifest
-    manifest = inspect_subparser.add_parser("manifest", help="Inspects a docker registry metadata.")
+    manifest = subparsers.add_parser("manifest", help="Inspects a docker registry metadata.")
     manifest.add_argument("url", nargs=1, help="Remote repository url.")
     manifest.set_defaults(func=_inspect_manifest)
     # config
-    config = inspect_subparser.add_parser("config", help="Inspects a docker registry metadata.")
+    config = subparsers.add_parser("config", help="Inspects a docker registry metadata.")
     config.add_argument("url", nargs=1, help="Remote repository url.")
     config.set_defaults(func=_inspect_config, short=False)
     # commands
-    commands = inspect_subparser.add_parser(
+    commands = subparsers.add_parser(
         "commands",
         help="Inspects a docker registry build commands. "
         "These are the same as when you check individual image layers on Docker hub.",
@@ -172,7 +207,7 @@ def main(*args):
     commands.add_argument("url", nargs=1, help="Remote repository url.")
     commands.set_defaults(func=_inspect_config, short=True)
     # layer
-    layer = inspect_subparser.add_parser("layer", help="Inspects a docker registry layer.")
+    layer = subparsers.add_parser("layer", help="Inspects a docker registry layer.")
     layer.add_argument("url", nargs=1, help="Remote repository url.")
     layer.add_argument(
         "layer_reference",
