@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import json
-import os
 import sys
 from getpass import getpass
 
@@ -144,7 +143,7 @@ def main(*args):
         "--proxy",
         nargs=1,
         help="Proxy for all requests. If your proxy contains authentication, pass it on the request in the usual "
-             "format \"http://user:pass@some.proxy.com\"",
+        'format "http://user:pass@some.proxy.com"',
         default=None,
     )
     subparsers = parser.add_subparsers()
