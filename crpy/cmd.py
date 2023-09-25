@@ -9,7 +9,7 @@ from rich import print
 
 from crpy.common import HTTPConnectionError, UnauthorizedError
 from crpy.registry import RegistryInfo
-from crpy.storage import save_credentials
+from crpy.storage import remove_credentials, save_credentials
 
 
 async def _pull(args):
@@ -34,6 +34,19 @@ async def _login(args):
     ri = RegistryInfo.from_url(args.url)
     await ri.auth(username=args.username, password=args.password)
     save_credentials(ri.registry, args.username, args.password)
+
+
+async def _logout(args):
+    ri = RegistryInfo.from_url(args.url)
+    assert not ri.repository, (
+        "Invalid url provided. Please provide the full registry url, without repository name.\n"
+        "   Example: [bold]index.docker.io[/bold] instead of [bold]index.docker.io/library/alpine[/bold]\n"
+        "            [bold]http://localhost:5000[/bold] instead of [bold]localhost:5000[/bold]"
+    )
+    if remove_credentials(ri.registry):
+        print(f"Removed credentials for {ri.registry}")
+    else:
+        raise ValueError(f"Could find find credentials for {ri.registry}")
 
 
 async def _inspect_manifest(args):
@@ -132,6 +145,10 @@ def main(*args):
     )
     login.add_argument("--username", "-u", nargs="?", help="Username", default=None)
     login.add_argument("--password", "-p", nargs="?", help="Password", default=None)
+
+    logout = subparsers.add_parser("logout", help="Logs out of a remote repo")
+    logout.add_argument("url", nargs="?", help="Remote repository to logout from.", default="index.docker.io")
+    logout.set_defaults(func=_logout)
 
     inspect = subparsers.add_parser(
         "inspect",

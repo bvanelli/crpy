@@ -51,6 +51,13 @@ def save_credentials(url: str, username: str, password: str):
     get_config_file().write_text(json.dumps(creds, indent=2))
 
 
+def remove_credentials(url: str) -> bool:
+    creds = get_config()
+    removed = creds["auths"].pop(url, None)
+    get_config_file().write_text(json.dumps(creds, indent=2))
+    return removed is not None
+
+
 def get_layer_path(layer: str) -> Optional[pathlib.Path]:
     cache_dir = get_config_dir() / "blobs/"
     os.makedirs(cache_dir, exist_ok=True)
