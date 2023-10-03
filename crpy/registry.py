@@ -373,7 +373,6 @@ class RegistryInfo:
             else:
                 output_kwargs = {"name": output_file, "mode": "w"}
             with tarfile.open(**output_kwargs) as tar_out:
-                print(os.curdir)
                 os.chdir(temp_dir)
                 tar_out.add(".")
                 os.chdir("..")  # leave the folder, otherwise it might not be able to be deleted on windows
