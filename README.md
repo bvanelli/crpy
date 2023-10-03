@@ -14,27 +14,34 @@ since received so many changes that it does not resemble the original code anymo
 TODO: Fill in once the "final" version of the API is stable. For a preview of the options, here is the help command:
 
 ```
->>> crpy --help
-usage: crpy [-h] [-k] [-p PROXY] {pull,push,login,inspect,repositories,tags,delete} ...
+usage: crpy [-h] [-k] [-p PROXY]
+            {pull,push,login,logout,auth,manifest,config,commands,layer,repositories,tags,delete} ...
 
 Package that can do basic docker command like pull and push without installing the docker virtual machine
 
 positional arguments:
-  {pull,push,login,inspect,repositories,tags,delete}
+  {pull,push,login,logout,auth,manifest,config,commands,layer,repositories,tags,delete}
     pull                Pulls a docker image from a remove repo.
     push                Pushes a docker image from a remove repo.
     login               Logs in on a remote repo
-    inspect             Inspects a docker registry metadata. It can inspect configs, manifests and layers.
+    logout              Logs out of a remote repo
+    auth                Shows authenticated repositories
+    manifest            Inspects a docker registry metadata.
+    config              Inspects a docker registry metadata.
+    commands            Inspects a docker registry build commands. These are the same as when you check individual
+                        image layers on Docker hub.
+    layer               Inspects a docker registry layer.
     repositories        List the repositories on the registry.
     tags                List the tags on a repository.
     delete              Deletes a tag in a remote repo.
 
-options:
+optional arguments:
   -h, --help            show this help message and exit
-  -k, --insecure        Use insecure registry. Ignores the validation of the certificate (useful for
-                        development registries).
+  -k, --insecure        Use insecure registry. Ignores the validation of the certificate (useful for development
+                        registries).
   -p PROXY, --proxy PROXY
-                        Proxy for all requests.
+                        Proxy for all requests. If your proxy contains authentication, pass it on the request in the
+                        usual format "http://user:pass@some.proxy.com"
 
 For reporting issues visit https://github.com/bvanelli/crpy
 ```

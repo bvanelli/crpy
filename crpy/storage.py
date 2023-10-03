@@ -1,9 +1,11 @@
+import base64
 import json
 import os
 import pathlib
+import sys
 from base64 import b64encode
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, Tuple
 
 from rich import print
 
@@ -14,7 +16,7 @@ def get_config_dir() -> pathlib.Path:
     assert os.path.isdir(cache_dir_root)
     cache_dir = cache_dir_root + "/.crpy/"
     if not os.path.exists(cache_dir):
-        print("Creating cache directory: " + cache_dir)
+        print("Creating cache directory: " + cache_dir, file=sys.stderr)
         os.makedirs(cache_dir)
     return pathlib.Path(cache_dir)
 
@@ -44,11 +46,23 @@ def get_credentials(url: str) -> Optional[str]:
     return None
 
 
+def decode_credentials(creds: str) -> Tuple[str, str]:
+    decoded_string = base64.b64decode(creds).decode()
+    return tuple(decoded_string.split(":", 1))  # noqa
+
+
 def save_credentials(url: str, username: str, password: str):
     creds = get_config()
     token = b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
     creds["auths"][url] = {"auth": token}
     get_config_file().write_text(json.dumps(creds, indent=2))
+
+
+def remove_credentials(url: str) -> bool:
+    creds = get_config()
+    removed = creds["auths"].pop(url, None)
+    get_config_file().write_text(json.dumps(creds, indent=2))
+    return removed is not None
 
 
 def get_layer_path(layer: str) -> Optional[pathlib.Path]:
@@ -69,8 +83,8 @@ def save_layer(layer: str, layer_data: bytes):
 
 
 def get_layer_from_cache(layer: str) -> Optional[bytes]:
+    """Returns the cache in bytes. If missing on disk, returns None."""
     layer_path = get_layer_path(layer)
     if layer_path:
-        print(f"Using cache for layer {layer.split(':')[1][0:12]}")
         return layer_path.read_bytes()
     return None
