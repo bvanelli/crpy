@@ -23,7 +23,7 @@ async def _pull(args):
     if not filename:
         # make file name compatible
         filename = ri.repository.replace(":", "_").replace("/", "_")
-    await ri.pull(filename)
+    await ri.pull(filename, args.architecture[0] if args.architecture else None)
 
 
 async def _push(args):
@@ -56,7 +56,13 @@ async def _logout(args):
 
 async def _inspect_manifest(args):
     ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
-    manifest = await ri.get_manifest_from_architecture()
+    if args.fat and args.architecture:
+        raise ValueError("Cannot provide --fat and --architecture together.")
+    if args.fat:
+        manifest_raw = await ri.get_manifest(fat=True)
+        manifest = manifest_raw.json()
+    else:
+        manifest = await ri.get_manifest_from_architecture(args.architecture[0] if args.architecture else None)
     print(manifest)
 
 
@@ -152,6 +158,15 @@ def main(*args):
         help="Pulls a docker image from a remove repo.",
     )
     pull.set_defaults(func=_pull)
+    pull.add_argument(
+        "--architecture",
+        "-a",
+        "--arch",
+        "--platform",
+        nargs=1,
+        help="Architecture for the to be pulled.",
+        default=None,
+    )
     pull.add_argument("url", nargs=1, help="Remote repository to pull from.")
     pull.add_argument("filename", nargs="?", help="Output file for the compressed image.")
 
@@ -191,6 +206,21 @@ def main(*args):
 
     # manifest
     manifest = subparsers.add_parser("manifest", help="Inspects a docker registry metadata.")
+    manifest.add_argument(
+        "--fat",
+        "-f",
+        action="store_true",
+        help="If should retrieve the fat manifest, with all different architechtures .",
+    )
+    manifest.add_argument(
+        "--architecture",
+        "-a",
+        "--arch",
+        "--platform",
+        nargs=1,
+        help="Architecture to retrieve the manifest for.",
+        default=None,
+    )
     manifest.add_argument("url", nargs=1, help="Remote repository url.")
     manifest.set_defaults(func=_inspect_manifest)
     # config

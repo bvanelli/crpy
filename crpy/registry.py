@@ -118,8 +118,8 @@ class RegistryInfo:
         method = "https" if self.https else "http"
         return f"{method}://{self.registry}/v2"
 
-    def manifest_url(self):
-        return f"{self.v2_url()}/{self.repository}/manifests/{self.tag}"
+    def manifest_url(self, reference: Optional[str] = None):
+        return f"{self.v2_url()}/{self.repository}/manifests/{reference or self.tag}"
 
     def blobs_url(self):
         return f"{self.v2_url()}/{self.repository}/blobs"
@@ -204,13 +204,17 @@ class RegistryInfo:
         return RegistryInfo(registry, name.strip("/"), tag, scheme == "https", proxy=proxy, insecure=insecure)
 
     @alru_cache
-    async def get_manifest(self, fat: bool = False) -> Response:
+    async def get_manifest(self, fat: bool = False, reference: Optional[str] = None) -> Response:
         """
         Gets the manifest for a remote docker image. This is a JSON file containing the metadata for how the image is
         stored.
         :param fat: If it should return the manifest list, rather than the default manifest. This allows the user to
             also select multiple architectures instead of being limited in just the default one.
             See https://docs.docker.com/registry/spec/manifest-v2-2/ for explanation.
+        :param reference: Reference for the manifest retrieval. If not specified, the configured tag is used as a
+            default. If you are looking for the manifest for a multi-arch image, then you need to first retrieve the
+            manifest by doing a fat manifest query then getting the correct reference for the architecture. Use the
+            method `get_manifest_from_architecture()` for that.
         :return: Response object with status code, raw data and response headers.
         """
         base_headers = (
@@ -224,20 +228,34 @@ class RegistryInfo:
                 _ociv1_index_mimetype,
             )
         headers = {"Accept": ", ".join(base_headers)}
-        response = await self._request_with_auth(self.manifest_url(), method="get", headers=headers)
+        response = await self._request_with_auth(self.manifest_url(reference), method="get", headers=headers)
         return response
 
-    @alru_cache
-    async def get_manifest_from_architecture(self, architecture: Union[str, Platform] = None) -> dict:
+    async def get_manifest_from_architecture(self, architecture: Union[str, Platform, None] = None) -> dict:
         if isinstance(architecture, Platform):
             architecture = architecture.value
+        elif isinstance(architecture, str):
+            # validate arch
+            try:
+                Platform(architecture)
+            except ValueError:
+                raise ValueError(
+                    f"Platform '{architecture}' not recognized. Choose one from {[e.value for e in Platform]}"
+                ) from None
         if architecture is not None:
             manifests = (await self.get_manifest(fat=True)).json()
             available_architectures = [platform_from_dict(manifest["platform"]) for manifest in manifests["manifests"]]
             for idx, a in enumerate(available_architectures):
                 if a == architecture:
-                    return manifests["manifests"][idx]
-            raise ValueError(f"No matching manifest for {architecture} in the manifest list entries at {self}")
+                    # the short manifest does not contain any layers, that is why we have to then re-query the API
+                    # to get the full one, passing the digest as reference name.
+                    short_manifest = manifests["manifests"][idx]
+                    full_manifest = await self.get_manifest(reference=short_manifest["digest"])
+                    return full_manifest.json()
+            raise ValueError(
+                f"No matching manifest for {architecture} in the manifest list entries at {self}.\n"
+                f"Available architectures: {available_architectures}"
+            )
         else:
             manifest = await self.get_manifest()
             return manifest.json()
@@ -260,7 +278,7 @@ class RegistryInfo:
         return response
 
     @alru_cache
-    async def get_layers(self, architecture: Union[str, Platform] = None) -> List[str]:
+    async def get_layers(self, architecture: Union[str, Platform, None] = None) -> List[str]:
         """
         Gets the digests for each layer available at the remote registry.
         :param architecture: optional architecture for the image. If not provided, the default registry architecture
@@ -314,7 +332,9 @@ class RegistryInfo:
             file_obj.seek(0)
             return file_obj.getvalue()
 
-    async def pull(self, output_file: Union[str, pathlib.Path, io.BytesIO], architecture: Union[str, Platform] = None):
+    async def pull(
+        self, output_file: Union[str, pathlib.Path, io.BytesIO], architecture: Union[str, Platform, None] = None
+    ):
         """
         Pulls an image from a remote repository. The image will be packed into a tar-file and saved to disk (or to a
         file-like object).

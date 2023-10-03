@@ -34,7 +34,7 @@ async def test_api_calls():
         == "sha256:25fad2a32ad1f6f510e528448ae1ec69a28ef81916a004d3629874104f8a7f70"
     )
     manifest_linux = await ri.get_manifest_from_architecture(Platform.LINUX)
-    assert manifest_linux == fat_manifest["manifests"][0]
+    assert manifest_linux == manifest
 
     config = await ri.get_config()
     assert config.json()["config"]["Cmd"][0] == "/bin/sh"

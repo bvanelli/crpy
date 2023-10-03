@@ -64,11 +64,39 @@ def compute_sha256(file: Union[str, io.BytesIO, bytes]):
 
 
 class Platform(enum.Enum):
+    # taken from https://github.com/docker-library/bashbrew/blob/v0.1.2/architecture/oci-platform.go#L14-L27
     LINUX = "linux/amd64"
     MAC = "linux/arm64/v8"
+    WINDOWS = "windows/amd64"
+    # less used platforms
+    ARM_32_V5 = "linux/arm/v5"
+    ARM_32_V6 = "linux/arm/v6"
+    ARM_32_V7 = "linux/arm/v7"
+    I386 = "linux/386"
+    MIPS64lE = "linux/mips64le"
+    PPC64LE = "linux/ppc64le"
+    RISCV64 = "linux/riscv64"
+    S390X = "linux/s390x"
+
+    @classmethod
+    def from_dict(cls, platform: dict) -> "Platform":
+        return cls(platform_from_dict(platform))
+
+    @property
+    def os(self) -> str:
+        return self.value.split("/")[0]
+
+    @property
+    def architecture(self) -> str:
+        return self.value.split("/")[1]
+
+    @property
+    def variant(self) -> Optional[str]:
+        split_value = self.value.split("/")
+        return split_value[2] if len(split_value) > 2 else None
 
 
-def platform_from_dict(platform: dict):
+def platform_from_dict(platform: dict) -> str:
     base_str = f"{platform.get('os')}/{platform.get('architecture')}"
     if "variant" in platform:
         base_str += f"/{platform.get('variant')}"
