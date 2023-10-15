@@ -44,7 +44,7 @@ async def _stream(url, headers: dict = None, aiohttp_kwargs: dict = None):
                 yield data
 
 
-def compute_sha256(file: Union[str, io.BytesIO, bytes]):
+def compute_sha256(file: Union[str, io.BytesIO, bytes], use_prefix: bool = True):
     # If input is a string, consider it a filename
     if isinstance(file, str):
         with open(file, "rb") as f:
@@ -59,8 +59,7 @@ def compute_sha256(file: Union[str, io.BytesIO, bytes]):
 
     # Compute the sha256 hash
     sha256_hash = hashlib.sha256(content).hexdigest()
-
-    return f"sha256:{sha256_hash}"
+    return f"sha256:{sha256_hash}" if use_prefix else sha256_hash
 
 
 class Platform(enum.Enum):
