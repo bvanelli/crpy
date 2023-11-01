@@ -187,7 +187,7 @@ class RegistryInfo:
             has_scheme = True
         else:
             scheme, has_scheme = "https", False
-        possibly_hub_image = (url.count("/") == 0 and "." not in url.split("/")[0]) or (  # example: alpine:latest
+        possibly_hub_image = (url.count("/") == 0 and "." not in url.split(":")[0]) or (  # example: alpine:latest
             url.count("/") == 1  # example: bitnami/postgres:latest
             and "." not in url.split("/")[0]  # exception: myregistry.com/alpine:latest
             and ":" not in url.split("/")[0]  # exception: localhost:5000/alpine:latest
@@ -350,7 +350,7 @@ class RegistryInfo:
         image.manifest = await self.get_manifest_from_architecture(architecture)
         raw_config = await self.get_config(architecture)
         image.config = raw_config.data
-        for layer in await self.get_layers():
+        for layer in await self.get_layers(architecture):
             layer_without_prefix = layer.split(":")[1]
             image.layers.append(
                 Blob.from_any(await self.pull_layer(layer, use_cache=True), digest=layer_without_prefix)
