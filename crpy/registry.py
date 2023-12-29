@@ -157,6 +157,7 @@ class RegistryInfo:
             username=username,
             password=password,
             b64_token=b64_token,
+            aiohttp_kwargs=self._aiohttp_kwargs,
         )
         print(f"Authenticated at {self}")
         return self.token
@@ -220,11 +221,11 @@ class RegistryInfo:
         base_headers = (
             _schema1_mimetype,
             _schema2_mimetype,
+            _ociv1_manifest_mimetype,
         )
         if fat:
             base_headers = base_headers + (
                 _schema2_list_mimetype,
-                _ociv1_manifest_mimetype,
                 _ociv1_index_mimetype,
             )
         headers = {"Accept": ", ".join(base_headers)}
@@ -271,6 +272,10 @@ class RegistryInfo:
         :return: Response object with status code, raw data and response headers.
         """
         manifest = await self.get_manifest_from_architecture(architecture)
+        # manifest should be a single entry - if not the case (i.e. oci images, retrieve the amd64 version
+        if manifest["mediaType"] in (_ociv1_index_mimetype, _schema2_list_mimetype):
+            default_platform = Platform.from_dict(manifest["manifests"][0]["platform"])
+            manifest = await self.get_manifest_from_architecture(default_platform)
         config_digest = manifest["config"]["digest"]
         response = await self._request_with_auth(
             f"{self.blobs_url()}/{config_digest}", method="get", headers=self._headers
