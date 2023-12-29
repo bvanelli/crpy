@@ -1,11 +1,8 @@
 from base64 import b64encode
 
-from async_lru import alru_cache
-
 from crpy.common import UnauthorizedError, _request
 
 
-@alru_cache
 async def get_token(
     url: str,
     username: str = None,

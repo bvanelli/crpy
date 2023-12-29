@@ -26,6 +26,11 @@ def test_parse_registry_url():
     bitnami = RegistryInfo.from_url("bitnami/postgresql")
     assert str(bitnami) == "index.docker.io/bitnami/postgresql:latest"
 
+    # alpine:3.18
+    alpine_3_18 = RegistryInfo.from_url("alpine:3.18")
+    assert alpine_3_18.repository == "library/alpine"
+    assert alpine_3_18.tag == "3.18"
+
 
 def test_url_from_auth():
     url = get_url_from_auth_header(
