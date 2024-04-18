@@ -28,7 +28,7 @@ async def _request(
 ) -> Response:
     aiohttp_kwargs = aiohttp_kwargs or {}
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(trust_env=True) as session:
             method_fn = getattr(session, method)
             async with method_fn(url, headers=headers, params=params, data=data, **aiohttp_kwargs) as response:
                 return Response(response.status, await response.read(), dict(response.headers))
@@ -38,13 +38,13 @@ async def _request(
 
 async def _stream(url, headers: dict = None, aiohttp_kwargs: dict = None):
     aiohttp_kwargs = aiohttp_kwargs or {}
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(trust_env=True) as session:
         async with session.get(url, headers=headers, **aiohttp_kwargs) as response:
             async for data, _ in response.content.iter_chunks():
                 yield data
 
 
-def compute_sha256(file: Union[str, io.BytesIO, bytes]):
+def compute_sha256(file: Union[str, io.BytesIO, bytes], use_prefix: bool = True):
     # If input is a string, consider it a filename
     if isinstance(file, str):
         with open(file, "rb") as f:
@@ -59,8 +59,7 @@ def compute_sha256(file: Union[str, io.BytesIO, bytes]):
 
     # Compute the sha256 hash
     sha256_hash = hashlib.sha256(content).hexdigest()
-
-    return f"sha256:{sha256_hash}"
+    return f"sha256:{sha256_hash}" if use_prefix else sha256_hash
 
 
 class Platform(enum.Enum):

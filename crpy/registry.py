@@ -1,7 +1,6 @@
 import functools
 import io
 import json
-import os
 import pathlib
 import re
 import sys
@@ -22,6 +21,7 @@ from crpy.common import (
     compute_sha256,
     platform_from_dict,
 )
+from crpy.image import Blob, Image
 from crpy.storage import get_credentials, get_layer_from_cache, save_layer
 
 # taken from https://github.com/davedoesdev/dxf/blob/master/dxf/__init__.py#L24
@@ -34,6 +34,10 @@ _schema2_list_mimetype = "application/vnd.docker.distribution.manifest.list.v2+j
 _ociv1_manifest_mimetype = "application/vnd.oci.image.manifest.v1+json"
 # OCIv1 equivalent of a docker registry v2 "manifests list"
 _ociv1_index_mimetype = "application/vnd.oci.image.index.v1+json"
+
+# media types
+_media_type_config = "application/vnd.docker.container.image.v1+json"
+_media_type_layer = "application/vnd.docker.image.rootfs.diff.tar.gzip"
 
 
 # we redirect all print statements no stderr, so that piping on command line works as expected. You can then pipe the
@@ -157,6 +161,7 @@ class RegistryInfo:
             username=username,
             password=password,
             b64_token=b64_token,
+            aiohttp_kwargs=self._aiohttp_kwargs,
         )
         print(f"Authenticated at {self}")
         return self.token
@@ -187,7 +192,7 @@ class RegistryInfo:
             has_scheme = True
         else:
             scheme, has_scheme = "https", False
-        possibly_hub_image = (url.count("/") == 0 and "." not in url.split("/")[0]) or (  # example: alpine:latest
+        possibly_hub_image = (url.count("/") == 0 and "." not in url.split(":")[0]) or (  # example: alpine:latest
             url.count("/") == 1  # example: bitnami/postgres:latest
             and "." not in url.split("/")[0]  # exception: myregistry.com/alpine:latest
             and ":" not in url.split("/")[0]  # exception: localhost:5000/alpine:latest
@@ -220,11 +225,11 @@ class RegistryInfo:
         base_headers = (
             _schema1_mimetype,
             _schema2_mimetype,
+            _ociv1_manifest_mimetype,
         )
         if fat:
             base_headers = base_headers + (
                 _schema2_list_mimetype,
-                _ociv1_manifest_mimetype,
                 _ociv1_index_mimetype,
             )
         headers = {"Accept": ", ".join(base_headers)}
@@ -271,6 +276,10 @@ class RegistryInfo:
         :return: Response object with status code, raw data and response headers.
         """
         manifest = await self.get_manifest_from_architecture(architecture)
+        # manifest should be a single entry - if not the case (i.e. oci images, retrieve the amd64 version
+        if manifest["mediaType"] in (_ociv1_index_mimetype, _schema2_list_mimetype):
+            default_platform = Platform.from_dict(manifest["manifests"][0]["platform"])
+            manifest = await self.get_manifest_from_architecture(default_platform)
         config_digest = manifest["config"]["digest"]
         response = await self._request_with_auth(
             f"{self.blobs_url()}/{config_digest}", method="get", headers=self._headers
@@ -337,46 +346,27 @@ class RegistryInfo:
     ):
         """
         Pulls an image from a remote repository. The image will be packed into a tar-file and saved to disk (or to a
-        file-like object).
+        file-like object). If you want to use your new image on Docker, use `docker load -i my_image` after pulling,
+        and it should be working, with the same tag.
 
         :param output_file: path or file-like object to save the binary data.
-        :param architecture: architecture to pull the image. If not set, the default registry architechture will be
+        :param architecture: architecture to pull the image. If not set, the default registry architecture will be
             used.
         :return:
         """
-        with tempfile.TemporaryDirectory() as temp_dir:
-            print(f"{self.tag}: Pulling from {self.registry}/{self.repository}")
-            web_manifest = await self.get_manifest_from_architecture(architecture)
-            config = await self.get_config(architecture)
-
-            config_filename = f'{web_manifest["config"]["digest"].split(":")[1]}.json'
-            with open(f"{temp_dir}/{config_filename}", "wb") as outfile:
-                outfile.write(config.data)
-
-            layer_path_l = []
-            for layer in await self.get_layers():
-                layer_folder = layer.split(":")[-1]
-                path = layer_folder + "/layer.tar"
-                layer_bytes = await self.pull_layer(layer, use_cache=True)
-                os.makedirs(f"{temp_dir}/{layer_folder}", exist_ok=True)
-                with open(f"{temp_dir}/{path}", "wb") as f:
-                    f.write(layer_bytes)
-                layer_path_l.append(path)
-                print(f"{layer.split(':')[1][0:12]}: Pull complete")
-
-            manifest = [{"Config": config_filename, "RepoTags": [str(self)], "Layers": layer_path_l}]
-            with open(f"{temp_dir}/manifest.json", "w") as outfile:
-                json.dump(manifest, outfile)
-
-            if isinstance(output_file, io.BytesIO):
-                output_kwargs = {"fileobj": output_file, "mode": "w"}
-            else:
-                output_kwargs = {"name": output_file, "mode": "w"}
-            with tarfile.open(**output_kwargs) as tar_out:
-                os.chdir(temp_dir)
-                tar_out.add(".")
-                os.chdir("..")  # leave the folder, otherwise it might not be able to be deleted on windows
-            print(f"Downloaded image from {self}")
+        print(f"{self.tag}: Pulling from {self.registry}/{self.repository}")
+        image = Image()
+        image.manifest = await self.get_manifest_from_architecture(architecture)
+        raw_config = await self.get_config(architecture)
+        image.config = raw_config.data
+        for layer in await self.get_layers(architecture):
+            layer_without_prefix = layer.split(":")[1]
+            image.layers.append(
+                Blob.from_any(await self.pull_layer(layer, use_cache=True), digest=layer_without_prefix)
+            )
+            print(f"{layer_without_prefix[0:12]}: Pull complete")
+        image.to_disk(output_file, tags=[str(self)])
+        print(f"Downloaded image from {self}")
 
     async def push_layer(self, file_obj: Union[bytes, str, pathlib.Path], force: bool = False) -> Optional[dict]:
         """
@@ -499,7 +489,7 @@ class RegistryInfo:
             config_path = pathlib.Path(temp_dir) / config
             config_manifest = await self.push_layer(config_path)
             config_manifest.pop("existing")
-            config_manifest["mediaType"] = "application/vnd.docker.container.image.v1+json"
+            config_manifest["mediaType"] = _media_type_config
 
             # upload layers
             layers_manifest = []
@@ -511,7 +501,7 @@ class RegistryInfo:
                 else:
                     print(f"{layer[0:12]}: Layer already exists")
                 layer_manifest.pop("existing")
-                layer_manifest["mediaType"] = "application/vnd.docker.image.rootfs.diff.tar.gzip"
+                layer_manifest["mediaType"] = _media_type_layer
                 layers_manifest.append(layer_manifest)
             # once the blobs are committed, we can push the manifest
             image_manifest = self.build_manifest(config_manifest, layers_manifest)
