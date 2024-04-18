@@ -35,6 +35,10 @@ _ociv1_manifest_mimetype = "application/vnd.oci.image.manifest.v1+json"
 # OCIv1 equivalent of a docker registry v2 "manifests list"
 _ociv1_index_mimetype = "application/vnd.oci.image.index.v1+json"
 
+# media types
+_media_type_config = "application/vnd.docker.container.image.v1+json"
+_media_type_layer = "application/vnd.docker.image.rootfs.diff.tar.gzip"
+
 
 # we redirect all print statements no stderr, so that piping on command line works as expected. You can then pipe the
 # results to jq or similar without interfering with the logging.
@@ -485,7 +489,7 @@ class RegistryInfo:
             config_path = pathlib.Path(temp_dir) / config
             config_manifest = await self.push_layer(config_path)
             config_manifest.pop("existing")
-            config_manifest["mediaType"] = "application/vnd.docker.container.image.v1+json"
+            config_manifest["mediaType"] = _media_type_config
 
             # upload layers
             layers_manifest = []
@@ -497,7 +501,7 @@ class RegistryInfo:
                 else:
                     print(f"{layer[0:12]}: Layer already exists")
                 layer_manifest.pop("existing")
-                layer_manifest["mediaType"] = "application/vnd.docker.image.rootfs.diff.tar.gzip"
+                layer_manifest["mediaType"] = _media_type_layer
                 layers_manifest.append(layer_manifest)
             # once the blobs are committed, we can push the manifest
             image_manifest = self.build_manifest(config_manifest, layers_manifest)
