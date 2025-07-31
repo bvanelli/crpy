@@ -37,6 +37,10 @@ Repository = "https://github.com/bvanelli/crpy.git"
 [project.scripts]
 crpy = "crpy.cmd:main"
 
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+
 [tool.setuptools.packages.find]
 exclude = ["docs*", "tests*", "examples*"]
 
