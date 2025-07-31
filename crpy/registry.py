@@ -237,6 +237,14 @@ class RegistryInfo:
         return response
 
     async def get_manifest_from_architecture(self, architecture: Union[str, Platform, None] = None) -> dict:
+        """
+        Returns the manifest as a dictionary for a given architecture. If no architecture is specified, it will return
+        the default manifest, which **might contain multiple entries**. If you want to only get the default manifest,
+        use `get_default_manifest()` instead.
+
+        :param architecture: optional architecture for the image.
+        :return: dictionary representation of the manifest.
+        """
         if isinstance(architecture, Platform):
             architecture = architecture.value
         elif isinstance(architecture, str):
@@ -266,6 +274,22 @@ class RegistryInfo:
             return manifest.json()
 
     @alru_cache
+    async def get_default_manifest(self, architecture: Union[str, Platform] = None) -> dict:
+        """
+        Same as `get_manifest_from_architecture()`, but will return one and only one manifest. If the architecture is
+        not specified, it will return the default manifest.
+
+        :param architecture: optional architecture for the image.
+        :return: dictionary representation of the manifest.
+        """
+        manifest = await self.get_manifest_from_architecture(architecture)
+        # manifest should be a single entry - if not the case (i.e., oci images), retrieve the default amd64 version
+        if manifest["mediaType"] in (_ociv1_index_mimetype, _schema2_list_mimetype):
+            default_platform = Platform.from_dict(manifest["manifests"][0]["platform"])
+            manifest = await self.get_manifest_from_architecture(default_platform)
+        return manifest
+
+    @alru_cache
     async def get_config(self, architecture: Union[str, Platform] = None) -> Response:
         """
         Gets the config of a docker image. The config contains all basic information of a docker image, including the
@@ -275,11 +299,7 @@ class RegistryInfo:
             will be pulled.
         :return: Response object with status code, raw data and response headers.
         """
-        manifest = await self.get_manifest_from_architecture(architecture)
-        # manifest should be a single entry - if not the case (i.e. oci images, retrieve the amd64 version
-        if manifest["mediaType"] in (_ociv1_index_mimetype, _schema2_list_mimetype):
-            default_platform = Platform.from_dict(manifest["manifests"][0]["platform"])
-            manifest = await self.get_manifest_from_architecture(default_platform)
+        manifest = await self.get_default_manifest(architecture)
         config_digest = manifest["config"]["digest"]
         response = await self._request_with_auth(
             f"{self.blobs_url()}/{config_digest}", method="get", headers=self._headers
@@ -294,7 +314,7 @@ class RegistryInfo:
             will be pulled.
         :return:
         """
-        manifest = await self.get_manifest_from_architecture(architecture)
+        manifest = await self.get_default_manifest(architecture)
         layers = [m["digest"] for m in manifest["layers"]]
         return layers
 
@@ -356,7 +376,7 @@ class RegistryInfo:
         """
         print(f"{self.tag}: Pulling from {self.registry}/{self.repository}")
         image = Image()
-        image.manifest = await self.get_manifest_from_architecture(architecture)
+        image.manifest = await self.get_default_manifest(architecture)
         raw_config = await self.get_config(architecture)
         image.config = raw_config.data
         for layer in await self.get_layers(architecture):
