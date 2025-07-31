@@ -1,8 +1,7 @@
 FROM python:3.13-slim-bookworm
 
+WORKDIR /app
 COPY . .
-# RUN python3 -m pip install build --user
-# RUN python3 -m build --sdist --wheel --outdir dist/ .
-RUN pip install .
+RUN pip install . && pip cache purge && rm -rf /app/*
 
 ENTRYPOINT ["crpy"]
