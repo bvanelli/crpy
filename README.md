@@ -9,7 +9,21 @@ The script creates a cache directory (~/.crpy/) to store layers already download
 It was based on a simpler version called [sdenel/docker-pull-push](https://github.com/sdenel/docker-pull-push), but has
 since received so many changes that it does not resemble the original code anymore.
 
-# Basic usage
+# Installation
+
+You can install it from the official pip repository:
+
+```bash
+pip install crpy
+```
+
+If you want to live on the edge and have the latest development features, install it directly from the repo:
+
+```bash
+pip install git+https://github.com/bvanelli/crpy.git
+```
+
+# Basic CLI usage
 
 TODO: Fill in once the "final" version of the API is stable. For a preview of the options, here is the help command:
 
@@ -46,18 +60,58 @@ optional arguments:
 For reporting issues visit https://github.com/bvanelli/crpy
 ```
 
-# Installation
-
-You can install it from the official pip repository:
+One of the original intended usages was to run it CI to cache dependencies docker image (i.e. for Gitlab). In this
+case, we can check if the image already exists on the remote repository:
 
 ```bash
-pip install crpy
+$ crpy manifest alpine:1.2.3
+Authenticated at index.docker.io/library/alpine:latest
+{'errors': [{'code': 'MANIFEST_UNKNOWN', 'message': 'manifest unknown', 'detail': 'unknown tag=1.2.3'}]}
 ```
 
-If you want to live on the edge and have the latest development features, install it directly from the repo:
+You are also able to download images and save them to disk:
 
 ```bash
-pip install git+https://github.com/bvanelli/crpy.git
+$ crpy pull alpine:latest alpine.tar.gz
+latest: Pulling from index.docker.io/library/alpine
+Authenticated at index.docker.io/library/alpine:latest
+Using cache for layer 9824c27679d3
+9824c27679d3: Pull complete
+Downloaded image from index.docker.io/library/alpine:latest
+```
+
+On can then push this image to another repository:
+
+```bash
+$ crpy push alpine.tar.gz bvanelli/test:latest
+crpy push alpine.tar.gz bvanelli/test:latest
+The push refers to repository
+Authenticated at index.docker.io/bvanelli/test:latest
+Authenticated at index.docker.io/bvanelli/test:latest
+9824c27679d3: Pushed
+Pushed latest: digest: sha256:3f372403810ab0506dda12549f1035804192ef02fb36040c036845f90bd6bfe2
+```
+
+Let's now list the tags available at this repository:
+
+```bash
+$ crpy tags bvanelli/test
+Authenticated at index.docker.io/bvanelli/test:latest
+1.0.0
+latest
+```
+
+And delete one of the tags. I show this example because both tags were the same, and deleting one will delete them both,
+so use this command with caution:
+
+```bash
+$ crpy delete bvanelli/test:1.0.0
+crpy delete bvanelli/test:1.0.0
+Authenticated at index.docker.io/bvanelli/test:1.0.0
+Authenticated at index.docker.io/bvanelli/test:1.0.0
+b''
+$ crpy tags bvanelli/test
+Authenticated at index.docker.io/bvanelli/test:latest
 ```
 
 # Why creating this package?

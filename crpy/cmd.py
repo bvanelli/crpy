@@ -130,6 +130,12 @@ async def _auth(args):
     print(table)
 
 
+async def _version(_args) -> None:
+    from crpy import __version__
+
+    print(__version__)
+
+
 def main(*args):
     parser = argparse.ArgumentParser(
         prog="crpy",
@@ -260,6 +266,9 @@ def main(*args):
         default="index.docker.io",
     )
     delete.set_defaults(func=_delete)
+    # version
+    version = subparsers.add_parser("version", help="Displays the application version.")
+    version.set_defaults(func=_version)
 
     arguments = parser.parse_args(args if args else None)
 

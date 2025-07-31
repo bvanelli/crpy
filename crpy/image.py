@@ -89,7 +89,7 @@ class Image:
     def to_disk(self, filename: pathlib.Path, tags: List[str] = None):
         with tempfile.TemporaryDirectory() as temp_dir:
             web_manifest = self.manifest.as_dict()
-            config_filename = f'{web_manifest["config"]["digest"].split(":")[1]}.json'
+            config_filename = f"{web_manifest['config']['digest'].split(':')[1]}.json"
             with open(f"{temp_dir}/{config_filename}", "wb") as outfile:
                 outfile.write(self.config.as_bytes())
 
@@ -101,6 +101,10 @@ class Image:
                 os.makedirs(f"{temp_dir}/{layer_folder}", exist_ok=True)
                 with open(f"{temp_dir}/{path}", "wb") as f:
                     f.write(layer_bytes)
+                # add version for backwards compatibility
+                # https://github.com/moby/moby/blob/daa4618da826fb1de4fc2478d88196edbba49b2f/image/spec/v1.md
+                with open(f"{temp_dir}/{layer_folder}/VERSION", "w") as f:
+                    f.write("1.0")
                 layer_path_l.append(path)
 
             manifest = [{"Config": config_filename, "RepoTags": tags or [], "Layers": layer_path_l}]

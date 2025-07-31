@@ -1,13 +1,11 @@
 import io
 import tarfile
 
-import pytest
 
 from crpy.common import Platform, compute_sha256
 from crpy.registry import RegistryInfo
 
 
-@pytest.mark.asyncio
 async def test_pull_docker_io():
     file = io.BytesIO()
     ri = RegistryInfo.from_url("index.docker.io/library/alpine:3.18.2")
@@ -20,11 +18,10 @@ async def test_pull_docker_io():
         assert len([layer for layer in content if layer.endswith("layer.tar")])
 
 
-@pytest.mark.asyncio
 async def test_api_calls():
     ri = RegistryInfo.from_url("index.docker.io/library/alpine:3.18.2")
     fat_manifest = (await ri.get_manifest(fat=True)).json()
-    manifest = (await ri.get_manifest()).json()
+    manifest = await ri.get_default_manifest()
     assert manifest["config"]["digest"] == "sha256:c1aabb73d2339c5ebaa3681de2e9d9c18d57485045a4e311d9f8004bec208d67"
     # the digest of the fat manifest should match the one in
     # https://hub.docker.com/layers/library/alpine/3.18.2/images/
@@ -47,7 +44,6 @@ async def test_api_calls():
     assert sha_256_layer == layers[0]
 
 
-@pytest.mark.asyncio
 async def test_list_tags():
     ri = RegistryInfo.from_url("index.docker.io/library/alpine")
     tags = await ri.list_tags()

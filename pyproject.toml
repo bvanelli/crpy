@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crpy"
+description = "Simple and straight forward async library for interacting with container registry API."
+readme = "README.md"
+authors = [
+    { name = "Brunno Vanelli", email = "brunnovanelli@gmail.com" }
+]
+requires-python = ">=3.9.0"
+dependencies = [
+    "requests>=2",
+    "async-lru>=2",
+    "aiohttp>=3",
+    "async-lru>=2",
+    "rich>=13.5",
+]
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+keywords = ["docker", "oci", "container-registry", "api"]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/bvanelli/crpy"
+Repository = "https://github.com/bvanelli/crpy.git"
+"Bug Tracker" = "https://github.com/bvanelli/crpy/issues"
+
+[project.scripts]
+crpy = "crpy.cmd:main"
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+
+[tool.setuptools.packages.find]
+exclude = ["docs*", "tests*", "examples*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "crpy.version.__version__" }
+
+[tool.ruff]
+line-length = 120
