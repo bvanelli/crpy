@@ -7,12 +7,12 @@ jobs:
     name: Tries to build the package and import it
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
         with:
-            python-version: "3.11"
+          python-version: "3.14"
       - name: Install locally
-        run: python3 -m pip install .
+        run: uv pip install .
       - name: Test library import
-        run: cd / && python3 -c "from crpy import RegistryInfo"
+        run: cd / && uv run python -c "from crpy import RegistryInfo"
