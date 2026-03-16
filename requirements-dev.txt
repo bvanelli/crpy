@@ -1,3 +1,0 @@
-pytest-asyncio>=1
-ruff>=0.12
-pytest>=8

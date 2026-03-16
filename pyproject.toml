@@ -9,12 +9,18 @@ readme = "README.md"
 authors = [
     { name = "Brunno Vanelli", email = "brunnovanelli@gmail.com" }
 ]
-requires-python = ">=3.9.0"
+requires-python = ">=3.10.0"
 dependencies = [
-    "async-lru>=2",
+    "async-lru==2.1.0",
     "aiohttp>=3",
-    "async-lru>=2",
     "rich>=13.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=1",
+    "ruff>=0.12",
 ]
 classifiers = [
     "Programming Language :: Python",
@@ -24,6 +30,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 keywords = ["docker", "oci", "container-registry", "api"]
 dynamic = ["version"]

@@ -14,16 +14,12 @@ jobs:
     permissions:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
     steps:
-      # taken from https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
-      - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
         with:
-            python-version: "3.11"
-      - name: Install pypa/build
-        run: python3 -m pip install build --user
+          python-version: "3.14"
       - name: Build a binary wheel and a source tarball
-        run: python3 -m build --sdist --wheel --outdir dist/ .
-      # retrieve your distributions here
+        run: uv build
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
