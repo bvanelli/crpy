@@ -362,7 +362,10 @@ class RegistryInfo:
             return file_obj.getvalue()
 
     async def pull(
-        self, output_file: Union[str, pathlib.Path, io.BytesIO], architecture: Union[str, Platform, None] = None
+        self,
+        output_file: Union[str, pathlib.Path, io.BytesIO],
+        architecture: Union[str, Platform, None] = None,
+        use_cache: bool = True,
     ):
         """
         Pulls an image from a remote repository. The image will be packed into a tar-file and saved to disk (or to a
@@ -372,6 +375,7 @@ class RegistryInfo:
         :param output_file: path or file-like object to save the binary data.
         :param architecture: architecture to pull the image. If not set, the default registry architecture will be
             used.
+        :param use_cache: enables the local cache, saving layers to ~/.crpy/ folder.
         :return:
         """
         print(f"{self.tag}: Pulling from {self.registry}/{self.repository}")
@@ -382,7 +386,7 @@ class RegistryInfo:
         for layer in await self.get_layers(architecture):
             layer_without_prefix = layer.split(":")[1]
             image.layers.append(
-                Blob.from_any(await self.pull_layer(layer, use_cache=True), digest=layer_without_prefix)
+                Blob.from_any(await self.pull_layer(layer, use_cache=use_cache), digest=layer_without_prefix)
             )
             print(f"{layer_without_prefix[0:12]}: Pull complete")
         image.to_disk(output_file, tags=[str(self)])

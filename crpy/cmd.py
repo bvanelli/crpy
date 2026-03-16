@@ -23,7 +23,7 @@ async def _pull(args):
     if not filename:
         # make file name compatible
         filename = ri.repository.replace(":", "_").replace("/", "_")
-    await ri.pull(filename, args.architecture[0] if args.architecture else None)
+    await ri.pull(filename, args.architecture[0] if args.architecture else None, not args.no_cache)
 
 
 async def _push(args):
@@ -172,6 +172,12 @@ def main(*args):
         nargs=1,
         help="Architecture for the to be pulled.",
         default=None,
+    )
+    pull.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="If should not use the cache when pulling the image.",
+        default=False,
     )
     pull.add_argument("url", nargs=1, help="Remote repository to pull from.")
     pull.add_argument("filename", nargs="?", help="Output file for the compressed image.")
