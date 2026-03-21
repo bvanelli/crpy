@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import io
 import json
@@ -6,8 +7,9 @@ import re
 import sys
 import tarfile
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Union
+from urllib.parse import urlparse
 
 from async_lru import alru_cache
 from rich import print as rprint
@@ -20,6 +22,7 @@ from crpy.common import (
     _stream,
     compute_sha256,
     platform_from_dict,
+    resolve_hostname,
 )
 from crpy.image import Blob, Image
 from crpy.storage import get_credentials, get_layer_from_cache, save_layer
@@ -46,6 +49,22 @@ print = functools.partial(rprint, file=sys.stderr)
 
 
 @dataclass
+class FirewallEntry:
+    role: str
+    request_url: str
+    ips: List[str] = field(default_factory=list)
+    redirect_url: Optional[str] = None
+
+    @property
+    def url(self) -> str:
+        return self.redirect_url or self.request_url
+
+    @property
+    def hostname(self) -> Optional[str]:
+        return urlparse(self.url).hostname
+
+
+@dataclass
 class RegistryInfo:
     """
     This dataclass does all interactions with a remote registry, using async methods. You can initialize the class
@@ -67,6 +86,8 @@ class RegistryInfo:
     # networking options
     proxy: Optional[str] = None
     insecure: bool = False
+    # Where the authentication url was resolved
+    auth_server_url: Optional[str] = None
 
     @property
     def _headers(self) -> dict:
@@ -155,9 +176,11 @@ class RegistryInfo:
         # check if config contains username and password we can use
         if not b64_token and use_config:
             b64_token = get_credentials(self.registry)
+        auth_url = get_url_from_auth_header(www_auth)
+        self.auth_server_url = auth_url
         # reuse this token in consecutive requests
         self.token = await get_token(
-            get_url_from_auth_header(www_auth),
+            auth_url,
             username=username,
             password=password,
             b64_token=b64_token,
@@ -596,3 +619,49 @@ class RegistryInfo:
         url = f"{self.v2_url()}/{self.repository}/manifests/{reference}"
         response = await self._request_with_auth(url, headers=self._headers, method="delete")
         return response
+
+    async def _head_entry(self, role: str, blob_url: str) -> FirewallEntry:
+        response = await self._request_with_auth(blob_url, method="head", headers=self._headers)
+        redirect_url = response.real_url if response.real_url and response.real_url != blob_url else None
+        return FirewallEntry(role, blob_url, redirect_url=redirect_url)
+
+    async def resolve(self, architecture: Union[str, "Platform", None] = None) -> List[FirewallEntry]:
+        """
+        Performs a dry-run pull to discover every network endpoint that a real pull would contact. Executes
+        authentication, manifest fetch, and HEAD requests for config and layer blobs — without downloading any data.
+        Each endpoint is resolved to its IP addresses via DNS.
+
+        This is useful for configuring firewall rules, proxy allowlists, or DNS policies in restricted networks,
+        since container pulls often hit multiple hosts (registry, auth server, CDN) that all need to be reachable.
+
+        ```python
+        ri = RegistryInfo.from_url("alpine:latest")
+        for entry in await ri.resolve():
+            print(entry.role, entry.hostname, entry.ips)
+        ```
+
+        :param architecture: optional architecture for the image.
+        :return: list of FirewallEntry objects with role, request URL, redirect URL, hostname and resolved IPs.
+        """
+        manifest = await self.get_default_manifest(architecture)
+
+        entries: List[FirewallEntry] = [
+            FirewallEntry("registry", self.manifest_url()),
+        ]
+
+        if self.auth_server_url:
+            entries.append(FirewallEntry("auth", self.auth_server_url))
+
+        config_digest = manifest["config"]["digest"]
+        entries.append(await self._head_entry("config", f"{self.blobs_url()}/{config_digest}"))
+
+        for idx, layer in enumerate(await self.get_layers(architecture)):
+            entries.append(await self._head_entry(f"layer-{idx}", f"{self.blobs_url()}/{layer}"))
+
+        unique_hostnames = {e.hostname for e in entries if e.hostname}
+        resolved = await asyncio.gather(*(resolve_hostname(h) for h in unique_hostnames))
+        ip_map = dict(zip(unique_hostnames, resolved))
+        for entry in entries:
+            entry.ips = ip_map.get(entry.hostname, [])
+
+        return entries
