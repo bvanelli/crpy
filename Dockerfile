@@ -1,7 +1,13 @@
-FROM python:3.13-slim-bookworm
+FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim AS builder
 
 WORKDIR /app
 COPY . .
-RUN pip install . && pip cache purge && rm -rf /app/*
+RUN uv build
+
+FROM python:3.14-slim-trixie
+
+COPY --from=builder /app/dist/*.whl /tmp/
+RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl
 
 ENTRYPOINT ["crpy"]
+CMD ["--help"]
