@@ -23,6 +23,12 @@ If you want to live on the edge and have the latest development features, instal
 pip install git+https://github.com/bvanelli/crpy.git
 ```
 
+Alternatively, you can run it directly with Docker:
+
+```bash
+docker run --rm ghcr.io/bvanelli/crpy:latest pull alpine:latest
+```
+
 # Basic CLI usage
 
 For a preview of the options, here is the help command:
