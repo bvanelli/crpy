@@ -1,0 +1,24 @@
+name: Build and push Docker image
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+jobs:
+  dockerize:
+    name: Build and push to GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build image
+        run: |
+          buildah build \
+            -t ghcr.io/${{ github.repository }}:$GITHUB_REF_NAME \
+            -t ghcr.io/${{ github.repository }}:latest .
+      - name: Push image
+        run: |
+          buildah login -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }} ghcr.io
+          buildah push ghcr.io/${{ github.repository }}:$GITHUB_REF_NAME
+          buildah push ghcr.io/${{ github.repository }}:latest
