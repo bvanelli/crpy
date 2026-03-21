@@ -6,6 +6,7 @@ from getpass import getpass
 
 from rich import print
 from rich.table import Table
+from rich.text import Text
 
 from crpy.common import HTTPConnectionError, UnauthorizedError
 from crpy.registry import RegistryInfo
@@ -130,6 +131,23 @@ async def _auth(args):
     print(table)
 
 
+async def _resolve(args):
+    ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
+    entries = await ri.resolve(args.architecture[0] if args.architecture else None)
+
+    table = Table(title=f"Endpoints for {args.url[0]}", title_style="bold")
+    table.add_column("Role", style="magenta", no_wrap=True)
+    table.add_column("Hostname", style="cyan")
+    table.add_column("IPs", style="green", overflow="fold")
+    table.add_column("URL", overflow="fold")
+
+    for entry in entries:
+        url_text = Text(entry.url)
+        url_text.stylize(f"link {entry.url}")
+        table.add_row(entry.role, entry.hostname or "", ", ".join(entry.ips), url_text)
+    print(table)
+
+
 async def _version(_args) -> None:
     from crpy import __version__
 
@@ -170,7 +188,7 @@ def main(*args):
         "--arch",
         "--platform",
         nargs=1,
-        help="Architecture for the to be pulled.",
+        help="Architecture for the image.",
         default=None,
     )
     pull.add_argument(
@@ -230,7 +248,7 @@ def main(*args):
         "--arch",
         "--platform",
         nargs=1,
-        help="Architecture to retrieve the manifest for.",
+        help="Architecture for the image.",
         default=None,
     )
     manifest.add_argument("url", nargs=1, help="Remote repository url.")
@@ -272,6 +290,23 @@ def main(*args):
         default="index.docker.io",
     )
     delete.set_defaults(func=_delete)
+    # resolve
+    resolve = subparsers.add_parser(
+        "resolve",
+        help="Dry-run a pull to discover every endpoint (registry, auth, CDN) and resolve their IPs. "
+        "Useful for configuring firewall rules, proxy allowlists, or DNS policies in restricted networks.",
+    )
+    resolve.set_defaults(func=_resolve)
+    resolve.add_argument("url", nargs=1, help="Remote repository url.")
+    resolve.add_argument(
+        "--architecture",
+        "-a",
+        "--arch",
+        "--platform",
+        nargs=1,
+        help="Architecture for the image.",
+        default=None,
+    )
     # version
     version = subparsers.add_parser("version", help="Displays the application version.")
     version.set_defaults(func=_version)
