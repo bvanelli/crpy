@@ -4,24 +4,24 @@ import os
 import pathlib
 import tarfile
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Optional, Union
 
 from crpy.common import compute_sha256
-
-INPUT_TYPES = Union[bytes, pathlib.Path, str, io.StringIO, dict, None]
 
 
 @dataclass
 class Blob:
-    path: Optional[pathlib.Path] = None
-    content: Optional[bytes] = None
-    filename: Optional[pathlib.Path] = None
-    digest: Optional[str] = None
+    path: pathlib.Path | None = None
+    content: bytes | None = None
+    filename: pathlib.Path | None = None
+    digest: str | None = None
 
     @classmethod
-    def from_any(cls, value: INPUT_TYPES, digest: str = None) -> "Blob":
-        if isinstance(value, str):
+    def from_any(cls, value: "INPUT_TYPES", digest: str | None = None) -> "Blob":
+        if isinstance(value, Blob):
+            return value
+        elif isinstance(value, str):
             return cls(pathlib.Path(value), digest=digest)
         elif isinstance(value, pathlib.Path):
             return cls(value, digest=digest)
@@ -31,12 +31,14 @@ class Blob:
             return cls(None, value.read().encode(), digest=digest)
         elif isinstance(value, dict):
             return cls(None, json.dumps(value).encode(), digest=digest)
+        raise ValueError(f"Unsupported type {type(value)}")
 
-    def as_bytes(self):
+    def as_bytes(self) -> bytes:
         if self.path:
             return self.path.read_bytes()
-        else:
-            return self.content
+        if self.content is None:
+            raise ValueError("Blob has no path or content")
+        return self.content
 
     def as_dict(self):
         return json.loads(self.as_bytes())
@@ -48,19 +50,22 @@ class Blob:
         return self.digest
 
 
+INPUT_TYPES = bytes | pathlib.Path | str | io.StringIO | dict | Blob | None
+
+
 class Image:
     """
     Component to interact with docker images for the purpose of building and generating tar-files with the correct
     layers. This can be populated at will and written to disk, having the individual blobs modified.
     """
 
-    def __init__(self, config: dict = None, manifest: dict = None, layers: List[bytes] = None):
-        self._config: Optional[Blob] = None
-        self._manifest: Optional[Blob] = None
-        self._layers: Optional[List[Blob]] = None
+    def __init__(self, config: INPUT_TYPES, manifest: INPUT_TYPES, layers: Sequence[INPUT_TYPES]):
+        self._config: Blob
+        self._manifest: Blob
+        self._layers: list[Blob]
         self.config = config
         self.manifest = manifest
-        self.layers = layers or []
+        self.layers = layers
 
     @property
     def manifest(self) -> Blob:
@@ -79,14 +84,14 @@ class Image:
         self._config = Blob.from_any(value)
 
     @property
-    def layers(self) -> List[Blob]:
+    def layers(self) -> list[Blob]:
         return self._layers
 
     @layers.setter
-    def layers(self, layers: List[INPUT_TYPES]):
+    def layers(self, layers: Sequence[INPUT_TYPES]):
         self._layers = [Blob.from_any(layer) for layer in layers]
 
-    def to_disk(self, filename: pathlib.Path, tags: List[str] = None):
+    def to_disk(self, filename: pathlib.Path | io.BytesIO | str, tags: list[str] | None = None):
         with tempfile.TemporaryDirectory() as temp_dir:
             web_manifest = self.manifest.as_dict()
             config_filename = f"{web_manifest['config']['digest'].split(':')[1]}.json"
@@ -112,10 +117,10 @@ class Image:
                 json.dump(manifest, outfile)
 
             if isinstance(filename, io.BytesIO):
-                output_kwargs = {"fileobj": filename, "mode": "w"}
+                tar_open = tarfile.open(fileobj=filename, mode="w")
             else:
-                output_kwargs = {"name": filename, "mode": "w"}
-            with tarfile.open(**output_kwargs) as tar_out:
+                tar_open = tarfile.open(name=filename, mode="w")
+            with tar_open as tar_out:
                 os.chdir(temp_dir)
                 tar_out.add(".")
                 os.chdir("..")

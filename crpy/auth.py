@@ -5,16 +5,16 @@ from crpy.common import UnauthorizedError, _request
 
 async def get_token(
     url: str,
-    username: str = None,
-    password: str = None,
-    b64_token: str = None,
-    aiohttp_kwargs: dict = None,
+    username: str | None = None,
+    password: str | None = None,
+    b64_token: str | None = None,
+    aiohttp_kwargs: dict | None = None,
 ):
     # get the credentials here.
     # I'll use the simple auth since it mostly works
     headers = {}
     if username and password:
-        token = b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        token = b64encode(f"{username}:{password}".encode()).decode("ascii")
         headers = {"Authorization": f"Basic {token}"}
     elif b64_token:
         headers = {"Authorization": f"Basic {b64_token}"}

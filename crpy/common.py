@@ -4,8 +4,7 @@ import hashlib
 import io
 import json
 import socket
-from dataclasses import dataclass
-from typing import List, Optional, Union
+from dataclasses import dataclass, field
 
 import aiohttp
 
@@ -14,7 +13,7 @@ import aiohttp
 class Response:
     status: int
     data: bytes
-    headers: Optional[dict] = None
+    headers: dict = field(default_factory=dict)
 
     def json(self) -> dict:
         return json.loads(self.data)
@@ -22,11 +21,11 @@ class Response:
 
 async def _request(
     url,
-    headers: dict = None,
-    params: dict = None,
-    data: Union[dict, bytes] = None,
+    headers: dict | None = None,
+    params: dict | None = None,
+    data: dict | bytes | None = None,
     method: str = "post",
-    aiohttp_kwargs: dict = None,
+    aiohttp_kwargs: dict | None = None,
 ) -> Response:
     aiohttp_kwargs = aiohttp_kwargs or {}
     try:
@@ -38,7 +37,7 @@ async def _request(
         raise HTTPConnectionError(str(e))
 
 
-async def _stream(url, headers: dict = None, aiohttp_kwargs: dict = None):
+async def _stream(url, headers: dict | None = None, aiohttp_kwargs: dict | None = None):
     aiohttp_kwargs = aiohttp_kwargs or {}
     async with aiohttp.ClientSession(trust_env=True) as session:
         async with session.get(url, headers=headers, **aiohttp_kwargs) as response:
@@ -46,7 +45,7 @@ async def _stream(url, headers: dict = None, aiohttp_kwargs: dict = None):
                 yield data
 
 
-def compute_sha256(file: Union[str, io.BytesIO, bytes], use_prefix: bool = True):
+def compute_sha256(file: str | io.BytesIO | bytes, use_prefix: bool = True):
     # If input is a string, consider it a filename
     if isinstance(file, str):
         with open(file, "rb") as f:
@@ -92,7 +91,7 @@ class Platform(enum.Enum):
         return self.value.split("/")[1]
 
     @property
-    def variant(self) -> Optional[str]:
+    def variant(self) -> str | None:
         split_value = self.value.split("/")
         return split_value[2] if len(split_value) > 2 else None
 
@@ -104,7 +103,7 @@ def platform_from_dict(platform: dict) -> str:
     return base_str
 
 
-async def resolve_hostname(hostname: str, family: int = socket.AF_UNSPEC) -> List[str]:
+async def resolve_hostname(hostname: str, family: int = socket.AF_UNSPEC) -> list[str]:
     """
     Resolves a hostname to a sorted list of unique IP addresses.
 
