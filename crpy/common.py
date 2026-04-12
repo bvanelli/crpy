@@ -3,6 +3,7 @@ import enum
 import hashlib
 import io
 import json
+import socket
 from dataclasses import dataclass
 from typing import List, Optional, Union
 
@@ -103,15 +104,17 @@ def platform_from_dict(platform: dict) -> str:
     return base_str
 
 
-async def resolve_hostname(hostname: str) -> List[str]:
+async def resolve_hostname(hostname: str, family: int = socket.AF_UNSPEC) -> List[str]:
     """
     Resolves a hostname to a sorted list of unique IP addresses.
 
     :param hostname: the hostname to resolve.
+    :param family: socket address family to filter results. Use ``socket.AF_INET`` for IPv4 only,
+        ``socket.AF_INET6`` for IPv6 only, or ``socket.AF_UNSPEC`` (default) for both.
     :return: sorted list of unique IP address strings.
     """
     loop = asyncio.get_running_loop()
-    results = await loop.getaddrinfo(hostname, None)
+    results = await loop.getaddrinfo(hostname, None, family=family)
     return sorted({r[4][0] for r in results})
 
 

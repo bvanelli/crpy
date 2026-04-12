@@ -134,7 +134,8 @@ async def _auth(args):
 
 async def _resolve(args):
     ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
-    entries = await ri.resolve(args.architecture[0] if args.architecture else None)
+    ip_version = 6 if args.ipv6 else (4 if args.ipv4 else 0)
+    entries = await ri.resolve(args.architecture[0] if args.architecture else None, ip_version=ip_version)
 
     table = Table(title=f"Endpoints for {args.url[0]}", title_style="bold")
     table.add_column("Role", style="magenta", no_wrap=True)
@@ -145,10 +146,12 @@ async def _resolve(args):
         url_text = Text(entry.url)
         url_text.stylize(f"link {entry.url}")
         table.add_row(entry.role, ", ".join(entry.ips), url_text)
+        table.add_section()
         if entry.redirect:
             redirect_text = Text(entry.redirect.url)
             redirect_text.stylize(f"link {entry.redirect.url}")
             table.add_row(f"{entry.role} (redirect)", ", ".join(entry.redirect.ips), redirect_text)
+            table.add_section()
 
     print(table)
 
@@ -312,6 +315,9 @@ def main(*args):
         help="Architecture for the image.",
         default=None,
     )
+    ip_group = resolve.add_mutually_exclusive_group()
+    ip_group.add_argument("-4", dest="ipv4", action="store_true", default=False, help="Resolve IPv4 addresses only.")
+    ip_group.add_argument("-6", dest="ipv6", action="store_true", default=False, help="Resolve IPv6 addresses only.")
     # version
     version = subparsers.add_parser("version", help="Displays the application version.")
     version.set_defaults(func=_version)

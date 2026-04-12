@@ -134,31 +134,43 @@ useful when you need to configure firewall rules, proxy allowlists, or DNS polic
 pulls often hit multiple hosts (registry, auth server, CDN) that all need to be reachable:
 
 ```bash
-$ crpy resolve alpine:latest
-                                 Endpoints for alpine:latest
-┏━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Role     ┃ Hostname        ┃ IPs                           ┃ URL                           ┃
-┡━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ registry │ index.docker.io │ 100.50.185.129,               │ https://index.docker.io/v2/li │
-│          │                 │ 174.129.222.113, 3.81.188.6,  │ brary/alpine/manifests/latest │
-│          │                 │ 44.208.12.140, 52.71.174.30,  │                               │
-│          │                 │ 52.86.153.188, 54.147.201.31, │                               │
-│          │                 │ 54.196.196.77                 │                               │
-│ auth     │ auth.docker.io  │ 104.18.43.178, 172.64.144.78  │ https://auth.docker.io/token? │
-│          │                 │                               │ service=registry.docker.io&sc │
-│          │                 │                               │ ope=repository:library/alpine │
-│          │                 │                               │ :pull                         │
-│ config   │ index.docker.io │ 100.50.185.129,               │ https://index.docker.io/v2/li │
-│          │                 │ 174.129.222.113, 3.81.188.6,  │ brary/alpine/blobs/sha256:a40 │
-│          │                 │ 44.208.12.140, 52.71.174.30,  │ c03cbb81c59bfb0e0887ab0b18597 │
-│          │                 │ 52.86.153.188, 54.147.201.31, │ 27075da7b9cc576a1cec2c771f38c │
-│          │                 │ 54.196.196.77                 │ 5fb                           │
-│ layer-0  │ index.docker.io │ 100.50.185.129,               │ https://index.docker.io/v2/li │
-│          │                 │ 174.129.222.113, 3.81.188.6,  │ brary/alpine/blobs/sha256:589 │
-│          │                 │ 44.208.12.140, 52.71.174.30,  │ 002ba0eaed121a1dbf42f6648f29e │
-│          │                 │ 52.86.153.188, 54.147.201.31, │ 5be55d5c8a6ee0f8eaa0285cc21ac │
-│          │                 │ 54.196.196.77                 │ 153                           │
-└──────────┴─────────────────┴───────────────────────────────┴───────────────────────────────┘
+$ crpy resolve -4 alpine:latest
+                                         Endpoints for alpine:latest
+┏━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Role               ┃ IPs                                       ┃ URL                                       ┃
+┡━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ auth               │ 104.18.43.178, 172.64.144.78              │ https://auth.docker.io/token?service=regi │
+│                    │                                           │ stry.docker.io&scope=repository:library/a │
+│                    │                                           │ lpine:pull                                │
+├────────────────────┼───────────────────────────────────────────┼───────────────────────────────────────────┤
+│ manifest           │ 32.192.123.231, 32.195.147.39,            │ https://index.docker.io/v2/library/alpine │
+│                    │ 34.206.220.186, 44.194.100.18,            │ /manifests/latest                         │
+│                    │ 52.71.123.245, 54.152.111.129,            │                                           │
+│                    │ 54.210.213.255, 98.94.122.193             │                                           │
+├────────────────────┼───────────────────────────────────────────┼───────────────────────────────────────────┤
+│ config             │ 32.192.123.231, 32.195.147.39,            │ https://index.docker.io/v2/library/alpine │
+│                    │ 34.206.220.186, 44.194.100.18,            │ /blobs/sha256:a40c03cbb81c59bfb0e0887ab0b │
+│                    │ 52.71.123.245, 54.152.111.129,            │ 1859727075da7b9cc576a1cec2c771f38c5fb     │
+│                    │ 54.210.213.255, 98.94.122.193             │                                           │
+├────────────────────┼───────────────────────────────────────────┼───────────────────────────────────────────┤
+│ config (redirect)  │ 172.64.66.1                               │ https://docker-images-prod.6aa30f8b08e164 │
+│                    │                                           │ 09b46e0173d6de2f56.r2.cloudflarestorage.c │
+│                    │                                           │ om/registry-v2/docker/registry/v2/blobs/s │
+│                    │                                           │ ha256/a4/a40c03cbb81c59bfb0e0887ab0b18597 │
+│                    │                                           │ 27075da7b9cc576a1cec2c771f38c5fb/data?... │
+├────────────────────┼───────────────────────────────────────────┼───────────────────────────────────────────┤
+│ layer-0            │ 32.192.123.231, 32.195.147.39,            │ https://index.docker.io/v2/library/alpine │
+│                    │ 34.206.220.186, 44.194.100.18,            │ /blobs/sha256:589002ba0eaed121a1dbf42f664 │
+│                    │ 52.71.123.245, 54.152.111.129,            │ 8f29e5be55d5c8a6ee0f8eaa0285cc21ac153     │
+│                    │ 54.210.213.255, 98.94.122.193             │                                           │
+├────────────────────┼───────────────────────────────────────────┼───────────────────────────────────────────┤
+│ layer-0 (redirect) │ 172.64.66.1                               │ https://docker-images-prod.6aa30f8b08e164 │
+│                    │                                           │ 09b46e0173d6de2f56.r2.cloudflarestorage.c │
+│                    │                                           │ om/registry-v2/docker/registry/v2/blobs/s │
+│                    │                                           │ ha256/58/589002ba0eaed121a1dbf42f6648f29e │
+│                    │                                           │ 5be55d5c8a6ee0f8eaa0285cc21ac153/data?... │
+└────────────────────┴───────────────────────────────────────────┴───────────────────────────────────────────┘
+
 ```
 
 # Why creating this package?

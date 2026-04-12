@@ -4,11 +4,12 @@ import io
 import json
 import pathlib
 import re
+import socket
 import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Literal
 from urllib.parse import urlparse
 
 from async_lru import alru_cache
@@ -633,7 +634,9 @@ class RegistryInfo:
         redirect = FirewallEntry(role, redirect_url, redirect=None) if redirect_url else None
         return FirewallEntry(role, blob_url, redirect=redirect)
 
-    async def resolve(self, architecture: Union[str, "Platform", None] = None) -> List[FirewallEntry]:
+    async def resolve(
+        self, architecture: Union[str, "Platform", None] = None, ip_version: Literal[4, 6, 0] = 0
+    ) -> List[FirewallEntry]:
         """
         Performs a dry-run pull to discover every network endpoint that a real pull would contact. Executes
         authentication, manifest fetch, and HEAD requests for config and layer blobs — without downloading any data.
@@ -649,6 +652,7 @@ class RegistryInfo:
         ```
 
         :param architecture: optional architecture for the image.
+        :param ip_version: IP version filter. Use `4` for IPv4 only, `6` for IPv6 only, or `0` (default) for both.
         :return: list of FirewallEntry objects with role, request URL, redirect URL, hostname and resolved IPs.
         """
         # multiple queries can be done for retrieving the manifest, but they all go to the same url
@@ -678,7 +682,8 @@ class RegistryInfo:
         unique_hostnames = set()
         for e in unwrapped_entries:
             unique_hostnames.add(e.hostname)
-        resolved = await asyncio.gather(*(resolve_hostname(h) for h in unique_hostnames))
+        family = {4: socket.AF_INET, 6: socket.AF_INET6}.get(ip_version, socket.AF_UNSPEC)
+        resolved = await asyncio.gather(*(resolve_hostname(h, family=family) for h in unique_hostnames))
         ip_map = dict(zip(unique_hostnames, resolved))
         for entry in unwrapped_entries:
             entry.ips = ip_map.get(entry.hostname, [])
