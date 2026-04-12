@@ -3,7 +3,6 @@ import enum
 import hashlib
 import io
 import json
-import socket
 from dataclasses import dataclass
 from typing import List, Optional, Union
 
@@ -15,7 +14,6 @@ class Response:
     status: int
     data: bytes
     headers: Optional[dict] = None
-    real_url: Optional[str] = None
 
     def json(self) -> dict:
         return json.loads(self.data)
@@ -34,9 +32,7 @@ async def _request(
         async with aiohttp.ClientSession(trust_env=True) as session:
             method_fn = getattr(session, method)
             async with method_fn(url, headers=headers, params=params, data=data, **aiohttp_kwargs) as response:
-                return Response(
-                    response.status, await response.read(), dict(response.headers), str(response.request_info.real_url)
-                )
+                return Response(response.status, await response.read(), dict(response.headers))
     except aiohttp.ClientConnectionError as e:
         raise HTTPConnectionError(str(e))
 
@@ -114,12 +110,9 @@ async def resolve_hostname(hostname: str) -> List[str]:
     :param hostname: the hostname to resolve.
     :return: sorted list of unique IP address strings.
     """
-    try:
-        loop = asyncio.get_running_loop()
-        results = await loop.getaddrinfo(hostname, None)
-        return sorted({r[4][0] for r in results})
-    except socket.gaierror:
-        return []
+    loop = asyncio.get_running_loop()
+    results = await loop.getaddrinfo(hostname, None)
+    return sorted({r[4][0] for r in results})
 
 
 # exceptions

@@ -8,6 +8,7 @@ from rich import print
 from rich.table import Table
 from rich.text import Text
 
+
 from crpy.common import HTTPConnectionError, UnauthorizedError
 from crpy.registry import RegistryInfo
 from crpy.storage import (
@@ -137,14 +138,18 @@ async def _resolve(args):
 
     table = Table(title=f"Endpoints for {args.url[0]}", title_style="bold")
     table.add_column("Role", style="magenta", no_wrap=True)
-    table.add_column("Hostname", style="cyan")
     table.add_column("IPs", style="green", overflow="fold")
     table.add_column("URL", overflow="fold")
 
     for entry in entries:
         url_text = Text(entry.url)
         url_text.stylize(f"link {entry.url}")
-        table.add_row(entry.role, entry.hostname or "", ", ".join(entry.ips), url_text)
+        table.add_row(entry.role, ", ".join(entry.ips), url_text)
+        if entry.redirect:
+            redirect_text = Text(entry.redirect.url)
+            redirect_text.stylize(f"link {entry.redirect.url}")
+            table.add_row(f"{entry.role} (redirect)", ", ".join(entry.redirect.ips), redirect_text)
+
     print(table)
 
 
