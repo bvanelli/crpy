@@ -15,7 +15,6 @@ class Response:
     status: int
     data: bytes
     headers: Optional[dict] = None
-    real_url: Optional[str] = None
 
     def json(self) -> dict:
         return json.loads(self.data)
@@ -34,9 +33,7 @@ async def _request(
         async with aiohttp.ClientSession(trust_env=True) as session:
             method_fn = getattr(session, method)
             async with method_fn(url, headers=headers, params=params, data=data, **aiohttp_kwargs) as response:
-                return Response(
-                    response.status, await response.read(), dict(response.headers), str(response.request_info.real_url)
-                )
+                return Response(response.status, await response.read(), dict(response.headers))
     except aiohttp.ClientConnectionError as e:
         raise HTTPConnectionError(str(e))
 
@@ -107,19 +104,18 @@ def platform_from_dict(platform: dict) -> str:
     return base_str
 
 
-async def resolve_hostname(hostname: str) -> List[str]:
+async def resolve_hostname(hostname: str, family: int = socket.AF_UNSPEC) -> List[str]:
     """
     Resolves a hostname to a sorted list of unique IP addresses.
 
     :param hostname: the hostname to resolve.
+    :param family: socket address family to filter results. Use ``socket.AF_INET`` for IPv4 only,
+        ``socket.AF_INET6`` for IPv6 only, or ``socket.AF_UNSPEC`` (default) for both.
     :return: sorted list of unique IP address strings.
     """
-    try:
-        loop = asyncio.get_running_loop()
-        results = await loop.getaddrinfo(hostname, None)
-        return sorted({r[4][0] for r in results})
-    except socket.gaierror:
-        return []
+    loop = asyncio.get_running_loop()
+    results = await loop.getaddrinfo(hostname, None, family=family)
+    return sorted({r[4][0] for r in results})
 
 
 # exceptions

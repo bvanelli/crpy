@@ -4,11 +4,12 @@ import io
 import json
 import pathlib
 import re
+import socket
 import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Literal
 from urllib.parse import urlparse
 
 from async_lru import alru_cache
@@ -51,17 +52,16 @@ print = functools.partial(rprint, file=sys.stderr)
 @dataclass
 class FirewallEntry:
     role: str
-    request_url: str
+    url: str
     ips: List[str] = field(default_factory=list)
-    redirect_url: Optional[str] = None
+    redirect: Optional["FirewallEntry"] = None
 
     @property
-    def url(self) -> str:
-        return self.redirect_url or self.request_url
-
-    @property
-    def hostname(self) -> Optional[str]:
-        return urlparse(self.url).hostname
+    def hostname(self) -> str:
+        parsed = urlparse(self.url)
+        if parsed.hostname is None:
+            raise ValueError(f"Could not parse url {self.url}")
+        return parsed.hostname
 
 
 @dataclass
@@ -113,16 +113,19 @@ class RegistryInfo:
         params: dict = None,
         data: Union[dict, bytes, None] = None,
         headers: dict = None,
+        aiohttp_kwargs: dict = None,
     ) -> Response:
         if not headers:
             headers = {}
+        if not aiohttp_kwargs:
+            aiohttp_kwargs = {}
         response = await _request(
             url,
             {**headers, **self._headers},
             params=params,
             data=data,
             method=method,
-            aiohttp_kwargs=self._aiohttp_kwargs,
+            aiohttp_kwargs=self._aiohttp_kwargs | aiohttp_kwargs,
         )
         if response.status == 401:
             www_auth = response.headers["WWW-Authenticate"]
@@ -620,12 +623,20 @@ class RegistryInfo:
         response = await self._request_with_auth(url, headers=self._headers, method="delete")
         return response
 
-    async def _head_entry(self, role: str, blob_url: str) -> FirewallEntry:
-        response = await self._request_with_auth(blob_url, method="head", headers=self._headers)
-        redirect_url = response.real_url if response.real_url and response.real_url != blob_url else None
-        return FirewallEntry(role, blob_url, redirect_url=redirect_url)
+    async def _resolve_entry(self, role: str, blob_url: str) -> FirewallEntry:
+        # Use GET with allow_redirects=False to capture CDN redirects (e.g. cdn01.quay.io).
+        response = await self._request_with_auth(
+            blob_url, headers=self._headers, method="get", aiohttp_kwargs={"allow_redirects": False}
+        )
+        redirect_url = (
+            str(response.headers.get("Location")) if response.headers and 300 <= response.status < 400 else None
+        )
+        redirect = FirewallEntry(role, redirect_url, redirect=None) if redirect_url else None
+        return FirewallEntry(role, blob_url, redirect=redirect)
 
-    async def resolve(self, architecture: Union[str, "Platform", None] = None) -> List[FirewallEntry]:
+    async def resolve(
+        self, architecture: Union[str, "Platform", None] = None, ip_version: Literal[4, 6, 0] = 0
+    ) -> List[FirewallEntry]:
         """
         Performs a dry-run pull to discover every network endpoint that a real pull would contact. Executes
         authentication, manifest fetch, and HEAD requests for config and layer blobs — without downloading any data.
@@ -641,27 +652,41 @@ class RegistryInfo:
         ```
 
         :param architecture: optional architecture for the image.
+        :param ip_version: IP version filter. Use `4` for IPv4 only, `6` for IPv6 only, or `0` (default) for both.
         :return: list of FirewallEntry objects with role, request URL, redirect URL, hostname and resolved IPs.
         """
+        # multiple queries can be done for retrieving the manifest, but they all go to the same url
         manifest = await self.get_default_manifest(architecture)
 
-        entries: List[FirewallEntry] = [
-            FirewallEntry("registry", self.manifest_url()),
-        ]
-
+        entries: List[FirewallEntry] = []
         if self.auth_server_url:
             entries.append(FirewallEntry("auth", self.auth_server_url))
+        entries.append(FirewallEntry("manifest", self.manifest_url()))
 
+        # we retrieve the config
         config_digest = manifest["config"]["digest"]
-        entries.append(await self._head_entry("config", f"{self.blobs_url()}/{config_digest}"))
+        entries.append(await self._resolve_entry("config", f"{self.blobs_url()}/{config_digest}"))
 
+        # then each individual layer
         for idx, layer in enumerate(await self.get_layers(architecture)):
-            entries.append(await self._head_entry(f"layer-{idx}", f"{self.blobs_url()}/{layer}"))
+            entries.append(await self._resolve_entry(f"layer-{idx}", f"{self.blobs_url()}/{layer}"))
 
-        unique_hostnames = {e.hostname for e in entries if e.hostname}
-        resolved = await asyncio.gather(*(resolve_hostname(h) for h in unique_hostnames))
-        ip_map = dict(zip(unique_hostnames, resolved))
+        # unwrap all entries once in case there were any redirects
+        unwrapped_entries: List[FirewallEntry] = []
         for entry in entries:
+            unwrapped_entries.append(entry)
+            if entry.redirect:
+                unwrapped_entries.append(entry.redirect)
+
+        # compute hostnames
+        unique_hostnames = set()
+        for e in unwrapped_entries:
+            unique_hostnames.add(e.hostname)
+        family = {4: socket.AF_INET, 6: socket.AF_INET6}.get(ip_version, socket.AF_UNSPEC)
+        resolved = await asyncio.gather(*(resolve_hostname(h, family=family) for h in unique_hostnames))
+        ip_map = dict(zip(unique_hostnames, resolved))
+        for entry in unwrapped_entries:
             entry.ips = ip_map.get(entry.hostname, [])
 
+        # return the original entries object (nested)
         return entries
