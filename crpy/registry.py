@@ -9,7 +9,7 @@ import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional, Union
+from typing import Literal, Optional, Union
 from urllib.parse import urlparse
 
 from async_lru import alru_cache
@@ -557,7 +557,7 @@ class RegistryInfo:
 
     async def _list(self, path: str, last: str | None = None, n: int | None = None, lazy: bool = False) -> list[dict]:
         url = f"{self.v2_url()}/{path}"
-        params: dict[str, Any] = {}
+        params: dict[str, int | str] = {}
         if n is not None:
             params["n"] = n
         if last is not None:
