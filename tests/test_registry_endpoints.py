@@ -1,7 +1,6 @@
 import io
 import tarfile
 
-
 from crpy.common import Platform, compute_sha256
 from crpy.registry import RegistryInfo
 

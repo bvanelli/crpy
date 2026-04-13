@@ -9,7 +9,7 @@ import sys
 import tarfile
 import tempfile
 from dataclasses import dataclass, field
-from typing import List, Optional, Union, Literal
+from typing import Literal, Optional, Union
 from urllib.parse import urlparse
 
 from async_lru import alru_cache
@@ -53,7 +53,7 @@ print = functools.partial(rprint, file=sys.stderr)
 class FirewallEntry:
     role: str
     url: str
-    ips: List[str] = field(default_factory=list)
+    ips: list[str] = field(default_factory=list)
     redirect: Optional["FirewallEntry"] = None
 
     @property
@@ -81,13 +81,13 @@ class RegistryInfo:
     repository: str
     tag: str
     https: bool = True
-    token: Optional[str] = None
+    token: str | None = None
 
     # networking options
-    proxy: Optional[str] = None
+    proxy: str | None = None
     insecure: bool = False
     # Where the authentication url was resolved
-    auth_server_url: Optional[str] = None
+    auth_server_url: str | None = None
 
     @property
     def _headers(self) -> dict:
@@ -98,9 +98,9 @@ class RegistryInfo:
 
     @property
     def _aiohttp_kwargs(self) -> dict:
-        kwargs = {}
+        kwargs: dict[str, str | bool] = {}
         if self.proxy:
-            kwargs["proxy"] = kwargs
+            kwargs["proxy"] = self.proxy
         if self.insecure:
             kwargs["ssl"] = False
         return kwargs
@@ -110,10 +110,10 @@ class RegistryInfo:
         url: str,
         *,
         method: str = "post",
-        params: dict = None,
-        data: Union[dict, bytes, None] = None,
-        headers: dict = None,
-        aiohttp_kwargs: dict = None,
+        params: dict | None = None,
+        data: dict | bytes | None = None,
+        headers: dict | None = None,
+        aiohttp_kwargs: dict | None = None,
     ) -> Response:
         if not headers:
             headers = {}
@@ -146,7 +146,7 @@ class RegistryInfo:
         method = "https" if self.https else "http"
         return f"{method}://{self.registry}/v2"
 
-    def manifest_url(self, reference: Optional[str] = None):
+    def manifest_url(self, reference: str | None = None):
         return f"{self.v2_url()}/{self.repository}/manifests/{reference or self.tag}"
 
     def blobs_url(self):
@@ -163,10 +163,10 @@ class RegistryInfo:
 
     async def auth(
         self,
-        www_auth: str = None,
-        username: str = None,
-        password: str = None,
-        b64_token: str = None,
+        www_auth: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        b64_token: str | None = None,
         use_config: bool = True,
     ):
         if www_auth is None:
@@ -193,7 +193,7 @@ class RegistryInfo:
         return self.token
 
     @staticmethod
-    def from_url(url: str, proxy: str = None, insecure: bool = False) -> "RegistryInfo":
+    def from_url(url: str, proxy: str | None = None, insecure: bool = False) -> "RegistryInfo":
         """
         Generates a RegistryInfo object from an url, automatically splitting the url into the dataclass fields.
 
@@ -235,7 +235,7 @@ class RegistryInfo:
         return RegistryInfo(registry, name.strip("/"), tag, scheme == "https", proxy=proxy, insecure=insecure)
 
     @alru_cache
-    async def get_manifest(self, fat: bool = False, reference: Optional[str] = None) -> Response:
+    async def get_manifest(self, fat: bool = False, reference: str | None = None) -> Response:
         """
         Gets the manifest for a remote docker image. This is a JSON file containing the metadata for how the image is
         stored.
@@ -248,7 +248,7 @@ class RegistryInfo:
             method `get_manifest_from_architecture()` for that.
         :return: Response object with status code, raw data and response headers.
         """
-        base_headers = (
+        base_headers: tuple[str, ...] = (
             _schema1_mimetype,
             _schema2_mimetype,
             _ociv1_manifest_mimetype,
@@ -262,7 +262,7 @@ class RegistryInfo:
         response = await self._request_with_auth(self.manifest_url(reference), method="get", headers=headers)
         return response
 
-    async def get_manifest_from_architecture(self, architecture: Union[str, Platform, None] = None) -> dict:
+    async def get_manifest_from_architecture(self, architecture: str | Platform | None = None) -> dict:
         """
         Returns the manifest as a dictionary for a given architecture. If no architecture is specified, it will return
         the default manifest, which **might contain multiple entries**. If you want to only get the default manifest,
@@ -300,7 +300,7 @@ class RegistryInfo:
             return manifest.json()
 
     @alru_cache
-    async def get_default_manifest(self, architecture: Union[str, Platform] = None) -> dict:
+    async def get_default_manifest(self, architecture: str | Platform | None = None) -> dict:
         """
         Same as `get_manifest_from_architecture()`, but will return one and only one manifest. If the architecture is
         not specified, it will return the default manifest.
@@ -316,7 +316,7 @@ class RegistryInfo:
         return manifest
 
     @alru_cache
-    async def get_config(self, architecture: Union[str, Platform] = None) -> Response:
+    async def get_config(self, architecture: str | Platform | None = None) -> Response:
         """
         Gets the config of a docker image. The config contains all basic information of a docker image, including the
         entrypoints, cmd, environment variables, etc.
@@ -333,7 +333,7 @@ class RegistryInfo:
         return response
 
     @alru_cache
-    async def get_layers(self, architecture: Union[str, Platform, None] = None) -> List[str]:
+    async def get_layers(self, architecture: str | Platform | None = None) -> list[str]:
         """
         Gets the digests for each layer available at the remote registry.
         :param architecture: optional architecture for the image. If not provided, the default registry architecture
@@ -344,9 +344,7 @@ class RegistryInfo:
         layers = [m["digest"] for m in manifest["layers"]]
         return layers
 
-    async def pull_layer(
-        self, layer: str, file_obj: Optional[io.BytesIO] = None, use_cache: bool = True
-    ) -> Optional[bytes]:
+    async def pull_layer(self, layer: str, file_obj: io.BytesIO | None = None, use_cache: bool = True) -> bytes | None:
         """
         Retrieves a layer from a remote registry.
 
@@ -367,15 +365,13 @@ class RegistryInfo:
 
         return await self.get_content_from_remote(layer, file_obj, use_cache)
 
-    async def get_content_from_remote(
-        self, layer: str, file_obj: Optional[io.BytesIO], use_cache: bool
-    ) -> Optional[bytes]:
+    async def get_content_from_remote(self, layer: str, file_obj: io.BytesIO | None, use_cache: bool) -> bytes | None:
         content = await self.get_response_content(layer, file_obj)
         if use_cache:
             save_layer(layer, content if file_obj is None else file_obj.getvalue())
         return content
 
-    async def get_response_content(self, layer: str, file_obj: Optional[io.BytesIO]) -> bytes:
+    async def get_response_content(self, layer: str, file_obj: io.BytesIO | None) -> bytes:
         if file_obj is None:
             response = await self._request_with_auth(f"{self.blobs_url()}/{layer}", method="get", headers=self._headers)
             return response.data
@@ -389,8 +385,8 @@ class RegistryInfo:
 
     async def pull(
         self,
-        output_file: Union[str, pathlib.Path, io.BytesIO],
-        architecture: Union[str, Platform, None] = None,
+        output_file: str | pathlib.Path | io.BytesIO,
+        architecture: str | Platform | None = None,
         use_cache: bool = True,
     ):
         """
@@ -405,20 +401,19 @@ class RegistryInfo:
         :return:
         """
         print(f"{self.tag}: Pulling from {self.registry}/{self.repository}")
-        image = Image()
-        image.manifest = await self.get_default_manifest(architecture)
+        manifest = await self.get_default_manifest(architecture)
         raw_config = await self.get_config(architecture)
-        image.config = raw_config.data
+        config = raw_config.data
+        layers = []
         for layer in await self.get_layers(architecture):
             layer_without_prefix = layer.split(":")[1]
-            image.layers.append(
-                Blob.from_any(await self.pull_layer(layer, use_cache=use_cache), digest=layer_without_prefix)
-            )
+            layers.append(Blob.from_any(await self.pull_layer(layer, use_cache=use_cache), digest=layer_without_prefix))
             print(f"{layer_without_prefix[0:12]}: Pull complete")
+        image = Image(config, manifest, layers)
         image.to_disk(output_file, tags=[str(self)])
         print(f"Downloaded image from {self}")
 
-    async def push_layer(self, file_obj: Union[bytes, str, pathlib.Path], force: bool = False) -> Optional[dict]:
+    async def push_layer(self, file_obj: bytes | str | pathlib.Path, force: bool = False) -> dict:
         """
         Pushes a layer to a remote repo.
 
@@ -458,13 +453,13 @@ class RegistryInfo:
             data=content,
             headers={"Content-Type": "application/octet-stream"},
         )
-        assert response.status == 201, f"Failed to upload blob with digest {digest}: {response.data}"
+        assert response.status == 201, f"Failed to upload blob with digest {digest}: {response.data.decode()}"
         manifest["existing"] = False
         return manifest
 
     @staticmethod
     def build_manifest(
-        config: dict, layers: List[dict], schema_version: int = 2, media_type: str = _schema2_mimetype
+        config: dict, layers: list[dict], schema_version: int = 2, media_type: str = _schema2_mimetype
     ) -> dict:
         """
         Manifest generator, taken from:
@@ -508,7 +503,7 @@ class RegistryInfo:
         assert response.status == 201
         return response
 
-    async def push(self, input_file: Union[str, pathlib.Path, io.BytesIO]):
+    async def push(self, input_file: str | pathlib.Path | io.BytesIO):
         """
         Pushes an input file to the remote repository. The tag that will be used is the one defined for the object. If
         no tag was provided, the default "latest" will be used. The file must be a tar-file with the config, manifest
@@ -560,9 +555,9 @@ class RegistryInfo:
             image_digest = r.headers.get("Docker-Content-Digest", "") or r.headers.get("docker-content-digest")
             print(f"Pushed {self.tag}: digest: {image_digest}")
 
-    async def _list(self, path: str, last: str = None, n: int = None, lazy: bool = False) -> List[dict]:
+    async def _list(self, path: str, last: str | None = None, n: int | None = None, lazy: bool = False) -> list[dict]:
         url = f"{self.v2_url()}/{path}"
-        params = {}
+        params: dict[str, int | str] = {}
         if n is not None:
             params["n"] = n
         if last is not None:
@@ -571,13 +566,14 @@ class RegistryInfo:
         ret_value = [response.json()]
         # use pagination to get further tags, if any
         if "Link" in response.headers and not lazy:
-            last = re.search(r"last=(\w+)", response.headers["Link"]).group(1)
-            n = re.search(r"n=(\d+)", response.headers["Link"]).group(1)
-            next_response = await self._list(path, last, int(n))
-            ret_value.append(next_response[0])
+            last_match = re.search(r"last=(\w+)", response.headers["Link"])
+            n_match = re.search(r"n=(\d+)", response.headers["Link"])
+            if last_match and n_match:
+                next_response = await self._list(path, last_match.group(1), int(n_match.group(1)))
+                ret_value.append(next_response[0])
         return ret_value
 
-    async def list_repositories(self, last: str = None, n: int = None) -> List[str]:
+    async def list_repositories(self, last: str | None = None, n: int | None = None) -> list[str]:
         """
         Lists the repositories contents to show all available images. It will retrieve all pages, unless lazy is
         specified. In order to list, the user token must have the appropriate permissions.
@@ -591,7 +587,7 @@ class RegistryInfo:
         response = await self._list("_catalog", last, n, False if n is None else True)
         return [entry for page in response for entry in page["repositories"]]
 
-    async def list_tags(self, last: str = None, n: int = None) -> List[str]:
+    async def list_tags(self, last: str | None = None, n: int | None = None) -> list[str]:
         """
         Lists the tags available for the repository. It will retrieve all pages, unless lazy is
         specified. In order to list, the user token must have the appropriate permissions.
@@ -636,7 +632,7 @@ class RegistryInfo:
 
     async def resolve(
         self, architecture: Union[str, "Platform", None] = None, ip_version: Literal[4, 6, 0] = 0
-    ) -> List[FirewallEntry]:
+    ) -> list[FirewallEntry]:
         """
         Performs a dry-run pull to discover every network endpoint that a real pull would contact. Executes
         authentication, manifest fetch, and HEAD requests for config and layer blobs — without downloading any data.
@@ -658,7 +654,7 @@ class RegistryInfo:
         # multiple queries can be done for retrieving the manifest, but they all go to the same url
         manifest = await self.get_default_manifest(architecture)
 
-        entries: List[FirewallEntry] = []
+        entries: list[FirewallEntry] = []
         if self.auth_server_url:
             entries.append(FirewallEntry("auth", self.auth_server_url))
         entries.append(FirewallEntry("manifest", self.manifest_url()))
@@ -672,7 +668,7 @@ class RegistryInfo:
             entries.append(await self._resolve_entry(f"layer-{idx}", f"{self.blobs_url()}/{layer}"))
 
         # unwrap all entries once in case there were any redirects
-        unwrapped_entries: List[FirewallEntry] = []
+        unwrapped_entries: list[FirewallEntry] = []
         for entry in entries:
             unwrapped_entries.append(entry)
             if entry.redirect:

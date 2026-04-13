@@ -8,7 +8,6 @@ from rich import print
 from rich.table import Table
 from rich.text import Text
 
-
 from crpy.common import HTTPConnectionError, UnauthorizedError
 from crpy.registry import RegistryInfo
 from crpy.storage import (

@@ -5,7 +5,6 @@ import pathlib
 import sys
 from base64 import b64encode
 from functools import lru_cache
-from typing import Optional, Tuple
 
 from rich import print
 
@@ -39,21 +38,22 @@ def get_config() -> dict:
         return {}
 
 
-def get_credentials(url: str) -> Optional[str]:
+def get_credentials(url: str) -> str | None:
     creds = get_config()
     if "auths" in creds and url in creds["auths"] and "auth" in creds["auths"][url]:
         return creds["auths"][url]["auth"]
     return None
 
 
-def decode_credentials(creds: str) -> Tuple[str, str]:
+def decode_credentials(creds: str) -> tuple[str, str]:
     decoded_string = base64.b64decode(creds).decode()
-    return tuple(decoded_string.split(":", 1))  # noqa
+    user, password = decoded_string.split(":", 1)
+    return user, password
 
 
 def save_credentials(url: str, username: str, password: str):
     creds = get_config()
-    token = b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+    token = b64encode(f"{username}:{password}".encode()).decode("ascii")
     creds["auths"][url] = {"auth": token}
     get_config_file().write_text(json.dumps(creds, indent=2))
 
@@ -65,7 +65,7 @@ def remove_credentials(url: str) -> bool:
     return removed is not None
 
 
-def get_layer_path(layer: str) -> Optional[pathlib.Path]:
+def get_layer_path(layer: str) -> pathlib.Path | None:
     cache_dir = get_config_dir() / "blobs/"
     os.makedirs(cache_dir, exist_ok=True)
     layer_path = cache_dir / layer.replace(":", "_")
@@ -82,7 +82,7 @@ def save_layer(layer: str, layer_data: bytes):
         file.write(layer_data)
 
 
-def get_layer_from_cache(layer: str) -> Optional[bytes]:
+def get_layer_from_cache(layer: str) -> bytes | None:
     """Returns the cache in bytes. If missing on disk, returns None."""
     layer_path = get_layer_path(layer)
     if layer_path:
