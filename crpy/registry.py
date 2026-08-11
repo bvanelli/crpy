@@ -10,15 +10,19 @@ import tarfile
 import tempfile
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from async_lru import alru_cache
 from rich import print as rprint
 
 from crpy.auth import get_token, get_url_from_auth_header
 from crpy.common import (
+    ManifestNotFoundError,
     Platform,
+    RegistryAPIError,
     Response,
+    UnauthorizedError,
+    ValidationError,
     _request,
     _stream,
     compute_sha256,
@@ -60,7 +64,7 @@ class FirewallEntry:
     def hostname(self) -> str:
         parsed = urlparse(self.url)
         if parsed.hostname is None:
-            raise ValueError(f"Could not parse url {self.url}")
+            raise ValidationError(f"Could not parse url {self.url}")
         return parsed.hostname
 
 
@@ -139,7 +143,7 @@ class RegistryInfo:
                 aiohttp_kwargs=self._aiohttp_kwargs,
             )
             if response.status == 401:
-                raise ValueError(f"Could not authenticate to registry {self}")
+                raise UnauthorizedError(f"Could not authenticate to registry {self}")
         return response
 
     def v2_url(self):
@@ -175,7 +179,6 @@ class RegistryInfo:
                 f"{method}://{self.registry}/v2/", method="get", aiohttp_kwargs=self._aiohttp_kwargs
             )
             www_auth = response.headers["WWW-Authenticate"]
-        assert www_auth.startswith('Bearer realm="')
         # check if config contains username and password we can use
         if not b64_token and use_config:
             b64_token = get_credentials(self.registry)
@@ -260,6 +263,7 @@ class RegistryInfo:
             )
         headers = {"Accept": ", ".join(base_headers)}
         response = await self._request_with_auth(self.manifest_url(reference), method="get", headers=headers)
+        response.raise_for_status(f"Could not retrieve manifest for {self}", exception=ManifestNotFoundError)
         return response
 
     async def get_manifest_from_architecture(self, architecture: str | Platform | None = None) -> dict:
@@ -278,7 +282,7 @@ class RegistryInfo:
             try:
                 Platform(architecture)
             except ValueError:
-                raise ValueError(
+                raise ValidationError(
                     f"Platform '{architecture}' not recognized. Choose one from {[e.value for e in Platform]}"
                 ) from None
         if architecture is not None:
@@ -291,7 +295,7 @@ class RegistryInfo:
                     short_manifest = manifests["manifests"][idx]
                     full_manifest = await self.get_manifest(reference=short_manifest["digest"])
                     return full_manifest.json()
-            raise ValueError(
+            raise ValidationError(
                 f"No matching manifest for {architecture} in the manifest list entries at {self}.\n"
                 f"Available architectures: {available_architectures}"
             )
@@ -330,6 +334,7 @@ class RegistryInfo:
         response = await self._request_with_auth(
             f"{self.blobs_url()}/{config_digest}", method="get", headers=self._headers
         )
+        response.raise_for_status(f"Could not retrieve config for {self}")
         return response
 
     @alru_cache
@@ -374,6 +379,7 @@ class RegistryInfo:
     async def get_response_content(self, layer: str, file_obj: io.BytesIO | None) -> bytes:
         if file_obj is None:
             response = await self._request_with_auth(f"{self.blobs_url()}/{layer}", method="get", headers=self._headers)
+            response.raise_for_status(f"Could not retrieve layer {layer} for {self}")
             return response.data
         else:
             async for chunk in _stream(
@@ -444,7 +450,12 @@ class RegistryInfo:
             return manifest
         # the process for pushing a layer is first making a request to /uploads and getting the location header
         response = await self._request_with_auth(f"{self.blobs_url()}/uploads/", method="post")
-        location_header = response.headers["Location"]
+        response.raise_for_status(f"Could not start blob upload for {self}", expect=202)
+        location_header = response.headers.get("Location")
+        if not location_header:
+            raise RegistryAPIError(f"Registry did not return an upload location for {self}", response)
+        # the spec allows relative Location values, resolve them against the registry
+        location_header = urljoin(self.v2_url(), location_header)
         # we do a monolith upload with a single PUT requests
         response = await self._request_with_auth(
             location_header,
@@ -453,7 +464,7 @@ class RegistryInfo:
             data=content,
             headers={"Content-Type": "application/octet-stream"},
         )
-        assert response.status == 201, f"Failed to upload blob with digest {digest}: {response.data.decode()}"
+        response.raise_for_status(f"Could not upload blob with digest {digest} for {self}", expect=201)
         manifest["existing"] = False
         return manifest
 
@@ -500,7 +511,7 @@ class RegistryInfo:
             data=json.dumps(manifest, indent=3).encode(),
             headers={"Content-Type": _schema2_mimetype},
         )
-        assert response.status == 201
+        response.raise_for_status(f"Could not push manifest for {self}", expect=201)
         return response
 
     async def push(self, input_file: str | pathlib.Path | io.BytesIO):
@@ -519,7 +530,7 @@ class RegistryInfo:
             else:
                 t = tarfile.TarFile(input_file)
         except tarfile.ReadError:
-            raise ValueError(f"Failed to load {input_file}. Is an Docker image?")
+            raise ValidationError(f"Failed to load {input_file}. Is an Docker image?")
         with tempfile.TemporaryDirectory() as temp_dir:
             t.extractall(temp_dir)
             manifest_path = pathlib.Path(temp_dir) / "manifest.json"
@@ -563,6 +574,7 @@ class RegistryInfo:
         if last is not None:
             params["last"] = last
         response = await self._request_with_auth(url, method="get", params=params, headers=self._headers)
+        response.raise_for_status(f"Could not list {url}")
         ret_value = [response.json()]
         # use pagination to get further tags, if any
         if "Link" in response.headers and not lazy:

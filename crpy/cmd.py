@@ -5,10 +5,11 @@ import sys
 from getpass import getpass
 
 from rich import print
+from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from crpy.common import HTTPConnectionError, UnauthorizedError
+from crpy.common import BaseCrpyError, ValidationError
 from crpy.registry import RegistryInfo
 from crpy.storage import (
     decode_credentials,
@@ -44,21 +45,22 @@ async def _login(args):
 
 async def _logout(args):
     ri = RegistryInfo.from_url(args.url)
-    assert not ri.repository, (
-        "Invalid url provided. Please provide the full registry url, without repository name.\n"
-        "   Example: [bold]index.docker.io[/bold] instead of [bold]index.docker.io/library/alpine[/bold]\n"
-        "            [bold]http://localhost:5000[/bold] instead of [bold]localhost:5000[/bold]"
-    )
+    if ri.repository:
+        raise ValidationError(
+            "Invalid url provided. Please provide the full registry url, without repository name.\n"
+            "   Example: index.docker.io instead of index.docker.io/library/alpine\n"
+            "            http://localhost:5000 instead of localhost:5000"
+        )
     if remove_credentials(ri.registry):
         print(f"Removed credentials for {ri.registry}")
     else:
-        raise ValueError(f"Could find find credentials for {ri.registry}")
+        raise ValidationError(f"Could not find credentials for {ri.registry}")
 
 
 async def _inspect_manifest(args):
     ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     if args.fat and args.architecture:
-        raise ValueError("Cannot provide --fat and --architecture together.")
+        raise ValidationError("Cannot provide --fat and --architecture together.")
     if args.fat:
         manifest_raw = await ri.get_manifest(fat=True)
         manifest = manifest_raw.json()
@@ -102,7 +104,7 @@ async def _repositories(args):
 async def _tags(args):
     ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     if not ri.repository:
-        raise ValueError("Repository must be provided to list tags!")
+        raise ValidationError("Repository must be provided to list tags!")
     for entry in await ri.list_tags():
         print(entry)
 
@@ -110,7 +112,7 @@ async def _tags(args):
 async def _delete(args):
     ri = RegistryInfo.from_url(args.url[0], proxy=args.proxy, insecure=args.insecure)
     if not ri.repository:
-        raise ValueError("Repository must be provided to list tags!")
+        raise ValidationError("Repository must be provided to delete a tag!")
     r = await ri.delete_tag()
     print(r.data)
 
@@ -328,8 +330,8 @@ def main(*args):
             parser.print_help()
         else:
             asyncio.run(arguments.func(arguments))
-    except (AssertionError, ValueError, UnauthorizedError, HTTPConnectionError, KeyboardInterrupt) as e:
-        print(f"[red]{e}[red]", file=sys.stderr)
+    except (BaseCrpyError, KeyboardInterrupt) as e:
+        print(f"[red]{escape(str(e))}[/red]", file=sys.stderr)
         sys.exit(-1)
 
 

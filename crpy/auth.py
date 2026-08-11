@@ -27,7 +27,7 @@ async def get_token(
     elif "access_token" in req_json:
         return req_json["access_token"]
     else:
-        raise ValueError(f"Authentication is required and it was not provided: {req_json}")
+        raise UnauthorizedError(f"Authentication is required and it was not provided: {req_json}")
 
 
 def get_url_from_auth_header(h: str):
@@ -36,6 +36,7 @@ def get_url_from_auth_header(h: str):
     'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/nginx:pull'
     """
     start_key = 'Bearer realm="'
-    assert h.startswith(start_key)
+    if not h.startswith(start_key):
+        raise UnauthorizedError(f"Unsupported authentication challenge from registry: {h}")
     out = h.lstrip(start_key).replace('",', "?", 1).replace('",', "&").replace('="', "=").rstrip('"')
     return out

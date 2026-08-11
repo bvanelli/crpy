@@ -8,11 +8,14 @@ from functools import lru_cache
 
 from rich import print
 
+from crpy.common import BaseCrpyError
+
 
 @lru_cache
 def get_config_dir() -> pathlib.Path:
     cache_dir_root = os.path.expanduser("~")
-    assert os.path.isdir(cache_dir_root)
+    if not os.path.isdir(cache_dir_root):
+        raise BaseCrpyError(f"Home directory {cache_dir_root} does not exist, cannot create the ~/.crpy cache")
     cache_dir = cache_dir_root + "/.crpy/"
     if not os.path.exists(cache_dir):
         print("Creating cache directory: " + cache_dir, file=sys.stderr)

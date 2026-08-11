@@ -18,6 +18,26 @@ class Response:
     def json(self) -> dict:
         return json.loads(self.data)
 
+    def raise_for_status(
+        self,
+        message: str,
+        *,
+        expect: int | None = None,
+        exception: type["RegistryAPIError"] | None = None,
+    ) -> None:
+        """
+        Raises a typed error unless the response indicates success.
+
+        :param message: context prefix for the error message.
+        :param expect: when given, any other status is an error (for endpoints where the spec mandates an exact
+            status, e.g. 201 on blob/manifest PUT).
+        :param exception: exception class to raise on 404 instead of `RegistryAPIError`.
+        """
+        if self.status == expect if expect is not None else self.status < 400:
+            return
+        error_class = exception if self.status == 404 and exception else RegistryAPIError
+        raise error_class(f"{message} (status {self.status}): {self.data.decode(errors='replace')}", self)
+
 
 async def _request(
     url,
@@ -127,4 +147,22 @@ class UnauthorizedError(BaseCrpyError):
 
 
 class HTTPConnectionError(BaseCrpyError):
+    pass
+
+
+class ValidationError(BaseCrpyError, ValueError):
+    pass
+
+
+class RegistryAPIError(BaseCrpyError):
+    def __init__(self, message: str, response: Response):
+        super().__init__(message)
+        self.response = response
+
+    @property
+    def status_code(self) -> int:
+        return self.response.status
+
+
+class ManifestNotFoundError(RegistryAPIError):
     pass
